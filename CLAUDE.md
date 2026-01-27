@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Smart Home MCP Server for controlling TAPO L530E smart light bulbs through Claude Desktop. Currently uses a mock implementation for development/testing.
+Smart Home MCP Server for controlling TAPO L530E smart light bulbs through Claude Desktop. Uses the `tapo` Python library for real device control, with automatic fallback to a mock implementation when credentials are unavailable.
 
 ## Commands
 
@@ -25,6 +25,18 @@ uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
 - **mcp_servers/**: FastMCP server definitions that expose tools to Claude Desktop
 
 The `TapoBulb` class persists state to `~/.smarthome/tapo_bulb_state.json`. The MCP server (`light_server.py`) creates a global bulb instance and exposes `turn_on`, `turn_off`, and `get_status` as MCP tools via the `@app.tool()` decorator.
+
+## Setup
+
+To control a real Tapo bulb, create `~/.smarthome/.env` with your credentials:
+
+```
+TAPO_USERNAME=your_tapo_email
+TAPO_PASSWORD=your_tapo_password
+TAPO_IP_ADDRESS=192.168.x.x
+```
+
+If this file is missing or the bulb is unreachable, the server automatically falls back to mock mode.
 
 ## Key Patterns
 

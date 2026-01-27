@@ -7,7 +7,8 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Turn lights on/off** via Claude Desktop
 - **Get bulb status** (on/off, brightness, color temperature)
 - **Persistent state** - bulb state survives server restarts
-- **Mock implementation** - test without physical hardware
+- **Real bulb control** - connect to a physical TAPO L530E via local network using the `tapo` library
+- **Mock fallback** - automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
 
 ## Project Structure
 
@@ -16,7 +17,7 @@ smarthome/
 ├── src/
 │   └── smarthome/
 │       ├── devices/
-│       │   └── tapo_bulb.py      # Mock TAPO bulb implementation
+│       │   └── tapo_bulb.py      # Real + mock TAPO bulb implementations
 │       └── mcp_servers/
 │           └── light_server.py    # FastMCP server
 ├── pyproject.toml
@@ -28,7 +29,7 @@ smarthome/
 ### 1. Install Dependencies
 
 ```bash
-uv add fastmcp pydantic
+uv add fastmcp pydantic tapo python-dotenv
 ```
 
 ### 2. Configure Claude Desktop
@@ -75,15 +76,18 @@ Once configured, you can control your light through Claude Desktop with natural 
 
 ## How It Works
 
-1. **Mock Bulb**: The `TapoBulb` class simulates a real TAPO L530E bulb
-2. **State Persistence**: Bulb state is saved to `~/.smarthome/tapo_bulb_state.json`
-3. **MCP Server**: FastMCP exposes three tools that Claude can use:
+1. **Real Bulb (`TapoBulb`)**: Connects to a physical TAPO L530E over the local network using the `tapo` library. State is read directly from the device via its HTTP API on each request — no local state file is needed.
+2. **Mock Bulb (`MockTapoBulb`)**: Simulates a TAPO bulb for development and testing. State is persisted to `~/.smarthome/tapo_bulb_state.json` so it survives server restarts.
+3. **Automatic Fallback**: On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing, incomplete, or the connection fails, it falls back to the mock. The `get_status` tool reports which mode is active.
+4. **MCP Server**: FastMCP exposes three tools that Claude can use:
    - `turn_on()` - Turn the bulb on
    - `turn_off()` - Turn the bulb off
-   - `get_status()` - Get current bulb state
-4. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
+   - `get_status()` - Get current bulb state (includes mode: real/mock)
+5. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
 
-## Testing Without Claude Desktop
+## Testing
+
+### Without Claude Desktop
 
 You can test the MCP server directly:
 
@@ -91,14 +95,30 @@ You can test the MCP server directly:
 uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
 ```
 
-This opens an interactive testing interface.
+This opens an interactive testing interface where you can call tools and inspect responses.
+
+### Check Bulb Connectivity
+
+If the server falls back to mock mode unexpectedly, use these commands to diagnose network issues:
+
+```bash
+# Check if the bulb is reachable on the local network
+ping 192.168.178.196
+
+# Verify the route to the bulb's IP goes through the correct network interface
+route get 192.168.178.196
+
+# Scan the local subnet to discover connected devices (requires nmap)
+nmap -sn 192.168.178.0/24
+```
+
+Replace the IP address with your bulb's actual IP. The `tapo` library communicates with the bulb directly over the local network (HTTP on port 80), so the bulb and your machine must be on the same network segment.
 
 ## Next Steps
 
 - [ ] Add brightness control
 - [ ] Add color temperature control
 - [ ] Add RGB color control
-- [ ] Replace mock bulb with real `python-kasa` library
 - [ ] Add multiple bulb support
 - [ ] Add scenes/routines
 
