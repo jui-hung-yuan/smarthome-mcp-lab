@@ -113,5 +113,25 @@ async def get_status() -> str:
     )
 
 
+@app.tool()
+async def set_brightness(level: int) -> str:
+    """Set the brightness level of the TAPO smart light bulb.
+
+    Args:
+        level: Brightness level from 0 to 100
+
+    Returns:
+        A message confirming the brightness was set
+    """
+    logger.info("Tool called: set_brightness(%d)", level)
+    b = await get_bulb()
+    result = await b.set_brightness(level)
+
+    if result["success"]:
+        return f"✓ {result['message']}. Current state: brightness={result['state']['brightness']}%"
+    else:
+        return f"✗ {result['message']}"
+
+
 if __name__ == "__main__":
     app.run()
