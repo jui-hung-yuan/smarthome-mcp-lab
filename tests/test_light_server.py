@@ -22,6 +22,16 @@ def _inject_bulb(mock_bulb):
     light_server.bulb = None
 
 
+@pytest.fixture(autouse=True)
+def _disable_dynamo(monkeypatch):
+    """Prevent DynamoDB calls during light server tests."""
+    from smarthome.logging import DynamoStateLogger
+
+    disabled_logger = DynamoStateLogger()
+    disabled_logger._disabled = True
+    monkeypatch.setattr(light_server, "state_logger", disabled_logger)
+
+
 @pytest.mark.asyncio
 async def test_turn_on_formats_response():
     result = await _turn_on()

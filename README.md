@@ -9,6 +9,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Persistent state** - bulb state survives server restarts
 - **Real bulb control** - connect to a physical TAPO L530E via local network using the `tapo` library
 - **Mock fallback** - automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
+- **DynamoDB state logging** - every state change on a real bulb is logged to DynamoDB for historical analysis (fire-and-forget, never breaks MCP tools)
 
 ## Project Structure
 
@@ -18,8 +19,16 @@ smarthome/
 │   └── smarthome/
 │       ├── devices/
 │       │   └── tapo_bulb.py      # Real + mock TAPO bulb implementations
+│       ├── logging/
+│       │   └── dynamo_logger.py   # DynamoDB state change logger
 │       └── mcp_servers/
 │           └── light_server.py    # FastMCP server
+├── scripts/
+│   └── create_dynamodb_table.py   # One-time DynamoDB table setup
+├── tests/
+│   ├── test_dynamo_logger.py      # DynamoDB logger tests (moto)
+│   ├── test_light_server.py       # MCP server tool tests
+│   └── test_mock_tapo_bulb.py     # Mock device tests
 ├── pyproject.toml
 └── README.md
 ```
@@ -29,7 +38,7 @@ smarthome/
 ### 1. Install Dependencies
 
 ```bash
-uv add fastmcp pydantic tapo python-dotenv
+uv add fastmcp pydantic tapo python-dotenv boto3
 ```
 
 ### 2. Configure Claude Desktop
@@ -79,11 +88,13 @@ Once configured, you can control your light through Claude Desktop with natural 
 1. **Real Bulb (`TapoBulb`)**: Connects to a physical TAPO L530E over the local network using the `tapo` library. State is read directly from the device via its HTTP API on each request — no local state file is needed.
 2. **Mock Bulb (`MockTapoBulb`)**: Simulates a TAPO bulb for development and testing. State is persisted to `~/.smarthome/tapo_bulb_state.json` so it survives server restarts.
 3. **Automatic Fallback**: On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing, incomplete, or the connection fails, it falls back to the mock. The `get_status` tool reports which mode is active.
-4. **MCP Server**: FastMCP exposes three tools that Claude can use:
+4. **MCP Server**: FastMCP exposes tools that Claude can use:
    - `turn_on()` - Turn the bulb on
    - `turn_off()` - Turn the bulb off
+   - `set_brightness(level)` - Set brightness (0-100)
    - `get_status()` - Get current bulb state (includes mode: real/mock)
-5. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
+5. **DynamoDB Logging**: When using a real bulb, every `turn_on`, `turn_off`, and `set_brightness` call logs the resulting state to a DynamoDB table. Logging is fire-and-forget — if DynamoDB is unreachable the logger disables itself and tools continue working normally. Mock bulb operations are not logged.
+6. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
 
 ## Testing
 
@@ -114,9 +125,31 @@ nmap -sn 192.168.178.0/24
 
 Replace the IP address with your bulb's actual IP. The `tapo` library communicates with the bulb directly over the local network (HTTP on port 80), so the bulb and your machine must be on the same network segment.
 
+### 4. Set Up DynamoDB State Logging (Optional)
+
+State logging requires AWS credentials via the `self` profile in `~/.aws/credentials` and a DynamoDB table.
+
+**Create the table:**
+
+```bash
+uv run python scripts/create_dynamodb_table.py
+```
+
+This creates a `smarthome-state-log` table with PAY_PER_REQUEST billing and a 30-day TTL.
+
+**Environment variables (all optional):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DYNAMODB_TABLE_NAME` | `smarthome-state-log` | DynamoDB table name |
+| `AWS_DEFAULT_REGION` | `eu-central-1` | AWS region |
+
+AWS credentials are read from the `self` profile in `~/.aws/credentials` (not from `~/.smarthome/.env`).
+
+If DynamoDB is not configured, the logger silently disables itself on first failure — no impact on MCP tools.
+
 ## Next Steps
 
-- [ ] Add brightness control
 - [ ] Add color temperature control
 - [ ] Add RGB color control
 - [ ] Add multiple bulb support
@@ -151,7 +184,19 @@ uv run fastmcp run src/smarthome/mcp_servers/light_server.py
 
 # Run with dev mode (interactive testing)
 uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
+
+# Run tests
+uv run pytest tests/ -v
 ```
+
+### Key Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `fastmcp` | MCP server framework |
+| `tapo` | TAPO device control over local network |
+| `boto3` | AWS SDK for DynamoDB state logging |
+| `moto` (dev) | In-memory AWS mock for testing |
 
 ## License
 

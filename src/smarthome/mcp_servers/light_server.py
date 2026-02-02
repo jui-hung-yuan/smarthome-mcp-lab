@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from dotenv import dotenv_values
 
 from smarthome.devices import TapoBulb, MockTapoBulb
+from smarthome.logging import DynamoStateLogger
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +24,10 @@ ENV_FILE = Path.home() / ".smarthome" / ".env"
 
 # Lazily initialized bulb instance
 bulb = None
+
+# State logger (fire-and-forget)
+state_logger = DynamoStateLogger()
+DEVICE_ID = "tapo-bulb-default"
 
 
 async def get_bulb():
@@ -65,6 +70,8 @@ async def turn_on() -> str:
     logger.info("Tool called: turn_on")
     b = await get_bulb()
     result = await b.turn_on()
+    if not isinstance(b, MockTapoBulb):
+        await state_logger.log_state_change(DEVICE_ID, "turn_on", result)
 
     if result["success"]:
         return f"✓ {result['message']}. Current state: {'ON' if result['state']['is_on'] else 'OFF'}"
@@ -82,6 +89,8 @@ async def turn_off() -> str:
     logger.info("Tool called: turn_off")
     b = await get_bulb()
     result = await b.turn_off()
+    if not isinstance(b, MockTapoBulb):
+        await state_logger.log_state_change(DEVICE_ID, "turn_off", result)
 
     if result["success"]:
         return f"✓ {result['message']}. Current state: {'ON' if result['state']['is_on'] else 'OFF'}"
@@ -126,6 +135,8 @@ async def set_brightness(level: int) -> str:
     logger.info("Tool called: set_brightness(%d)", level)
     b = await get_bulb()
     result = await b.set_brightness(level)
+    if not isinstance(b, MockTapoBulb):
+        await state_logger.log_state_change(DEVICE_ID, "set_brightness", result)
 
     if result["success"]:
         return f"✓ {result['message']}. Current state: brightness={result['state']['brightness']}%"

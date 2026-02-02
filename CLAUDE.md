@@ -23,6 +23,7 @@ uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
 
 - **devices/**: Device implementations (currently mock `TapoBulb` class)
 - **mcp_servers/**: FastMCP server definitions that expose tools to Claude Desktop
+- **logging/**: State logging (`DynamoStateLogger`) that writes device events to DynamoDB
 
 The `TapoBulb` class persists state to `~/.smarthome/tapo_bulb_state.json`. The MCP server (`light_server.py`) creates a global bulb instance and exposes `turn_on`, `turn_off`, and `get_status` as MCP tools via the `@app.tool()` decorator.
 
@@ -38,8 +39,24 @@ TAPO_IP_ADDRESS=192.168.x.x
 
 If this file is missing or the bulb is unreachable, the server automatically falls back to mock mode.
 
+### DynamoDB State Logging
+
+State changes are logged to DynamoDB (table: `smarthome-state-log`). AWS credentials come from the `self` profile in `~/.aws/credentials` (set `AWS_PROFILE=self`).
+
+Environment variables:
+- `DYNAMODB_TABLE_NAME` (default: `smarthome-state-log`)
+- `AWS_DEFAULT_REGION` (default: `eu-central-1`)
+
+Create the table once:
+```bash
+uv run python scripts/create_dynamodb_table.py
+```
+
+Logging is fire-and-forget: if DynamoDB is unreachable, the logger disables itself and MCP tools continue working normally.
+
 ## Key Patterns
 
 - Tools are defined using FastMCP's `@app.tool()` decorator and return string messages
 - Device state is persisted to JSON files in `~/.smarthome/`
 - Devices are initialized as module-level globals in server files
+- State logging is fire-and-forget: `DynamoStateLogger` catches all exceptions and disables itself after the first failure to avoid repeated retries
