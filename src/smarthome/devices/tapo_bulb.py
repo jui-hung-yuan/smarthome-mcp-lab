@@ -8,10 +8,12 @@ from datetime import datetime
 
 from tapo import ApiClient
 
+from smarthome.devices.base import BaseDevice
+
 logger = logging.getLogger(__name__)
 
 
-class MockTapoBulb:
+class MockTapoBulb(BaseDevice):
     """Mock implementation of TAPO L530E smart bulb.
 
     Simulates a real TAPO bulb for development and testing.
@@ -93,8 +95,62 @@ class MockTapoBulb:
             "state": await self.get_status()
         }
 
+    # BaseDevice interface implementation
 
-class TapoBulb:
+    @property
+    def device_type(self) -> str:
+        return "bulb"
+
+    @property
+    def supported_actions(self) -> list[str]:
+        return ["turn_on", "turn_off", "set_brightness", "get_status"]
+
+    async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        if action not in self.supported_actions:
+            return {
+                "success": False,
+                "message": f"Unknown action: {action}",
+                "state": await self.get_shadow_state(),
+            }
+
+        if action == "turn_on":
+            return await self.turn_on()
+        elif action == "turn_off":
+            return await self.turn_off()
+        elif action == "set_brightness":
+            brightness = parameters.get("brightness")
+            if brightness is None:
+                return {
+                    "success": False,
+                    "message": "brightness parameter required",
+                    "state": await self.get_shadow_state(),
+                }
+            return await self.set_brightness(int(brightness))
+        elif action == "get_status":
+            return {
+                "success": True,
+                "message": "Status retrieved",
+                "state": await self.get_status(),
+            }
+
+    async def apply_desired_state(self, desired: Dict[str, Any]) -> None:
+        if "is_on" in desired:
+            if desired["is_on"]:
+                await self.turn_on()
+            else:
+                await self.turn_off()
+        if "brightness" in desired:
+            await self.set_brightness(int(desired["brightness"]))
+
+    async def get_shadow_state(self) -> Dict[str, Any]:
+        return {
+            "is_on": self.state["is_on"],
+            "brightness": self.state["brightness"],
+            "color_temp": self.state["color_temp"],
+        }
+
+
+class TapoBulb(BaseDevice):
     """Real Tapo L530E control via the tapo library."""
 
     def __init__(self, device):
@@ -145,4 +201,59 @@ class TapoBulb:
             "success": True,
             "message": f"Brightness set to {brightness}",
             "state": await self.get_status()
+        }
+
+    # BaseDevice interface implementation
+
+    @property
+    def device_type(self) -> str:
+        return "bulb"
+
+    @property
+    def supported_actions(self) -> list[str]:
+        return ["turn_on", "turn_off", "set_brightness", "get_status"]
+
+    async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        if action not in self.supported_actions:
+            return {
+                "success": False,
+                "message": f"Unknown action: {action}",
+                "state": await self.get_shadow_state(),
+            }
+
+        if action == "turn_on":
+            return await self.turn_on()
+        elif action == "turn_off":
+            return await self.turn_off()
+        elif action == "set_brightness":
+            brightness = parameters.get("brightness")
+            if brightness is None:
+                return {
+                    "success": False,
+                    "message": "brightness parameter required",
+                    "state": await self.get_shadow_state(),
+                }
+            return await self.set_brightness(int(brightness))
+        elif action == "get_status":
+            return {
+                "success": True,
+                "message": "Status retrieved",
+                "state": await self.get_status(),
+            }
+
+    async def apply_desired_state(self, desired: Dict[str, Any]) -> None:
+        if "is_on" in desired:
+            if desired["is_on"]:
+                await self.turn_on()
+            else:
+                await self.turn_off()
+        if "brightness" in desired:
+            await self.set_brightness(int(desired["brightness"]))
+
+    async def get_shadow_state(self) -> Dict[str, Any]:
+        status = await self.get_status()
+        return {
+            "is_on": status["is_on"],
+            "brightness": status["brightness"],
+            "color_temp": status["color_temp"],
         }

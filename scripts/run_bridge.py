@@ -22,6 +22,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from smarthome.bridge.config import load_config
+from smarthome.bridge.device_registry import DeviceRegistry
 from smarthome.bridge.iot_bridge import IoTBridge
 from smarthome.devices.tapo_bulb import MockTapoBulb, TapoBulb
 
@@ -82,11 +83,15 @@ async def main(args: argparse.Namespace) -> int:
         logger.error(str(e))
         return 1
 
-    # Create bulb
+    # Create bulb and register it
     bulb = await create_bulb(args.mock)
 
-    # Create and start bridge
-    bridge = IoTBridge(config, bulb)
+    # Create registry and register the device
+    registry = DeviceRegistry()
+    registry.register(config.device_id, bulb)
+
+    # Create and start bridge with registry
+    bridge = IoTBridge(config, registry)
 
     # Set up graceful shutdown
     shutdown_event = asyncio.Event()

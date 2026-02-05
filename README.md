@@ -11,6 +11,8 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Mock fallback** - automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
 - **DynamoDB state logging** - every state change on a real bulb is logged to DynamoDB for historical analysis (fire-and-forget, never breaks MCP tools)
 - **AWS IoT Core integration** - remote control via MQTT with Device Shadow for state sync
+- **Multi-device support** - single bridge manages multiple devices via `DeviceRegistry`
+- **Device-agnostic architecture** - `BaseDevice` interface allows easy addition of new device types
 
 ## Project Structure
 
@@ -19,23 +21,27 @@ smarthome/
 ├── src/
 │   └── smarthome/
 │       ├── devices/
+│       │   ├── base.py            # BaseDevice ABC (common interface)
 │       │   └── tapo_bulb.py       # Real + mock TAPO bulb implementations
 │       ├── logging/
 │       │   └── dynamo_logger.py   # DynamoDB state change logger
 │       ├── bridge/
 │       │   ├── config.py          # IoT config loader
+│       │   ├── device_registry.py # Multi-device registry
 │       │   ├── shadow_manager.py  # Device Shadow operations
-│       │   └── iot_bridge.py      # AWS IoT Core MQTT bridge
+│       │   └── iot_bridge.py      # Device-agnostic MQTT bridge
 │       └── mcp_servers/
 │           └── light_server.py    # FastMCP server
 ├── scripts/
 │   ├── create_dynamodb_table.py   # One-time DynamoDB table setup
-│   ├── create_iot_thing.py        # IoT Thing provisioning
+│   ├── create_bridge_thing.py     # IoT Bridge Thing provisioning
 │   └── run_bridge.py              # IoT Bridge entry point
 ├── docs/
 │   └── iot-bridge.md              # IoT Bridge documentation
 ├── tests/
 │   ├── mocks/                     # Test mocks
+│   ├── test_base_device.py        # BaseDevice interface tests
+│   ├── test_device_registry.py    # DeviceRegistry tests
 │   ├── test_iot_bridge.py         # IoT Bridge tests
 │   ├── test_shadow_manager.py     # Shadow manager tests
 │   └── ...                        # Other tests
@@ -95,16 +101,40 @@ Once configured, you can control your light through Claude Desktop with natural 
 
 ## How It Works
 
-1. **Real Bulb (`TapoBulb`)**: Connects to a physical TAPO L530E over the local network using the `tapo` library. State is read directly from the device via its HTTP API on each request — no local state file is needed.
-2. **Mock Bulb (`MockTapoBulb`)**: Simulates a TAPO bulb for development and testing. State is persisted to `~/.smarthome/tapo_bulb_state.json` so it survives server restarts.
-3. **Automatic Fallback**: On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing, incomplete, or the connection fails, it falls back to the mock. The `get_status` tool reports which mode is active.
-4. **MCP Server**: FastMCP exposes tools that Claude can use:
+### Device Layer
+
+1. **BaseDevice Interface**: All devices implement a common `BaseDevice` abstract class with:
+   - `execute(action, parameters)` - Execute any action (turn_on, set_brightness, etc.)
+   - `apply_desired_state(desired)` - Apply state from IoT Shadow
+   - `get_shadow_state()` - Get current state for shadow reporting
+   - `supported_actions` - List of actions the device supports
+
+2. **Real Bulb (`TapoBulb`)**: Connects to a physical TAPO L530E over the local network using the `tapo` library. State is read directly from the device via its HTTP API on each request.
+
+3. **Mock Bulb (`MockTapoBulb`)**: Simulates a TAPO bulb for development and testing. State is persisted to `~/.smarthome/tapo_bulb_state.json` so it survives server restarts.
+
+4. **Automatic Fallback**: On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing, incomplete, or the connection fails, it falls back to the mock. The `get_status` tool reports which mode is active.
+
+### MCP Server
+
+5. **MCP Server**: FastMCP exposes tools that Claude can use:
    - `turn_on()` - Turn the bulb on
    - `turn_off()` - Turn the bulb off
    - `set_brightness(level)` - Set brightness (0-100)
    - `get_status()` - Get current bulb state (includes mode: real/mock)
-5. **DynamoDB Logging**: When using a real bulb, every `turn_on`, `turn_off`, and `set_brightness` call logs the resulting state to a DynamoDB table. Logging is fire-and-forget — if DynamoDB is unreachable the logger disables itself and tools continue working normally. Mock bulb operations are not logged.
+
 6. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
+
+### IoT Bridge (Remote Control)
+
+7. **DeviceRegistry**: Manages multiple devices by ID, enabling a single bridge to control many devices.
+
+8. **IoT Bridge**: Device-agnostic MQTT bridge that:
+   - Subscribes to `smarthome/{device_id}/commands/{action}` for each registered device
+   - Routes commands to devices via `device.execute()`
+   - Reports device states to IoT Shadow under `devices.{device_id}`
+
+9. **DynamoDB Logging**: When using a real bulb, every `turn_on`, `turn_off`, and `set_brightness` call logs the resulting state to a DynamoDB table. Logging is fire-and-forget — if DynamoDB is unreachable the logger disables itself and tools continue working normally. Mock bulb operations are not logged.
 
 ## Testing
 
@@ -160,15 +190,18 @@ If DynamoDB is not configured, the logger silently disables itself on first fail
 
 ### 5. Set Up IoT Bridge for Remote Control (Optional)
 
-The IoT Bridge enables remote control via AWS IoT Core MQTT.
+The IoT Bridge enables remote control via AWS IoT Core MQTT. The bridge is device-agnostic and supports multiple devices through a `DeviceRegistry`.
 
-**Provision IoT resources:**
+**Provision IoT Bridge:**
 
 ```bash
-uv run python scripts/create_iot_thing.py
+uv run python scripts/create_bridge_thing.py
 ```
 
-This creates an IoT Thing, certificates, and policy in AWS.
+This creates:
+- An IoT Thing (`smarthome-bridge-home`) representing the bridge
+- Certificates for secure MQTT connection
+- A policy allowing multi-device control (`smarthome/*/commands/*`)
 
 **Start the bridge:**
 
@@ -189,13 +222,35 @@ aws iot-data publish \
   --cli-binary-format raw-in-base64-out
 ```
 
+**Shadow structure** (multi-device):
+
+```json
+{
+  "state": {
+    "reported": {
+      "bridge_connected": true,
+      "devices": {
+        "tapo-bulb-default": {
+          "is_on": true,
+          "brightness": 80,
+          "color_temp": 2700,
+          "device_reachable": true
+        }
+      }
+    }
+  }
+}
+```
+
 See `docs/iot-bridge.md` for full documentation.
 
 ## Next Steps
 
+- [x] ~~Add multiple bulb support~~ (Done: `DeviceRegistry` + device-agnostic bridge)
 - [ ] Add color temperature control
 - [ ] Add RGB color control
-- [ ] Add multiple bulb support
+- [ ] Add additional device types (smart plugs, sensors)
+- [ ] Add device auto-discovery on local network
 - [ ] Add scenes/routines
 
 ## Troubleshooting

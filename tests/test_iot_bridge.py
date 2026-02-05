@@ -1,21 +1,20 @@
 """Tests for the IoTBridge class."""
 
 import json
-import pytest
-from dataclasses import dataclass
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
+
+import pytest
 
 from smarthome.bridge.config import IoTConfig
+from smarthome.bridge.device_registry import DeviceRegistry
 from smarthome.bridge.iot_bridge import IoTBridge
 from smarthome.devices.tapo_bulb import MockTapoBulb
 
 # Import mocks directly to avoid module path issues
-import sys
-from pathlib import Path
-
 sys.path.insert(0, str(Path(__file__).parent))
-from mocks.mock_iot_client import MockMqttConnection, MockShadowClient
+from mocks.mock_iot_client import MockMqttConnection
 
 
 @pytest.fixture
@@ -62,24 +61,31 @@ def mock_shadow_manager():
 
 
 @pytest.fixture
-def bridge(iot_config, mock_bulb):
+def registry(mock_bulb, iot_config):
+    """Create a device registry with the mock bulb registered."""
+    reg = DeviceRegistry()
+    reg.register(iot_config.device_id, mock_bulb)
+    return reg
+
+
+@pytest.fixture
+def bridge(iot_config, registry):
     """Create an IoTBridge instance for testing."""
-    return IoTBridge(iot_config, mock_bulb)
+    return IoTBridge(iot_config, registry)
 
 
 class TestIoTBridgeInit:
     """Tests for IoTBridge initialization."""
 
-    def test_init_sets_config(self, iot_config, mock_bulb):
+    def test_init_sets_config(self, iot_config, registry):
         """Test that config is properly stored."""
-        bridge = IoTBridge(iot_config, mock_bulb)
+        bridge = IoTBridge(iot_config, registry)
         assert bridge._config == iot_config
 
-    def test_init_sets_topic_prefixes(self, iot_config, mock_bulb):
-        """Test that topic prefixes are correctly set."""
-        bridge = IoTBridge(iot_config, mock_bulb)
-        assert bridge._command_topic_prefix == "smarthome/test-device/commands/"
-        assert bridge._response_topic_prefix == "smarthome/test-device/responses/"
+    def test_init_sets_registry(self, iot_config, registry):
+        """Test that registry is properly stored."""
+        bridge = IoTBridge(iot_config, registry)
+        assert bridge._registry is registry
 
     def test_init_not_running(self, bridge):
         """Test that bridge is not running after init."""
@@ -88,67 +94,89 @@ class TestIoTBridgeInit:
 
 
 class TestIoTBridgeCommandHandling:
-    """Tests for command handling."""
+    """Tests for command handling via _handle_command.
+
+    Note: Command execution logic is now in the device's execute() method.
+    See test_base_device.py for comprehensive execute() tests.
+    These tests verify the bridge correctly routes commands to the device.
+    """
 
     @pytest.mark.asyncio
-    async def test_handle_turn_on(self, bridge, mock_bulb):
-        """Test turn_on command handling."""
-        result = await bridge._handle_turn_on({})
+    async def test_handle_command_turn_on(
+        self, bridge, mock_bulb, mock_connection, mock_shadow_manager
+    ):
+        """Test turn_on command via _handle_command."""
+        bridge._connection = mock_connection
+        bridge._shadow_manager = mock_shadow_manager
 
-        assert result["success"] is True
-        assert "turned on" in result["message"].lower()
+        topic = "smarthome/test-device/commands/turn_on"
+        payload = json.dumps({"request_id": "test-on", "parameters": {}}).encode()
+
+        await bridge._handle_command(topic, payload)
 
         status = await mock_bulb.get_status()
         assert status["is_on"] is True
 
+        responses = mock_connection.get_published_to("smarthome/test-device/responses/")
+        assert len(responses) == 1
+        response_data = json.loads(responses[0].payload.decode())
+        assert response_data["success"] is True
+
     @pytest.mark.asyncio
-    async def test_handle_turn_off(self, bridge, mock_bulb):
-        """Test turn_off command handling."""
-        # First turn on
+    async def test_handle_command_turn_off(
+        self, bridge, mock_bulb, mock_connection, mock_shadow_manager
+    ):
+        """Test turn_off command via _handle_command."""
+        bridge._connection = mock_connection
+        bridge._shadow_manager = mock_shadow_manager
         await mock_bulb.turn_on()
 
-        result = await bridge._handle_turn_off({})
+        topic = "smarthome/test-device/commands/turn_off"
+        payload = json.dumps({"request_id": "test-off", "parameters": {}}).encode()
 
-        assert result["success"] is True
-        assert "turned off" in result["message"].lower()
+        await bridge._handle_command(topic, payload)
 
         status = await mock_bulb.get_status()
         assert status["is_on"] is False
 
     @pytest.mark.asyncio
-    async def test_handle_get_status(self, bridge, mock_bulb):
-        """Test get_status command handling."""
-        result = await bridge._handle_get_status({})
+    async def test_handle_command_set_brightness(
+        self, bridge, mock_bulb, mock_connection, mock_shadow_manager
+    ):
+        """Test set_brightness command via _handle_command."""
+        bridge._connection = mock_connection
+        bridge._shadow_manager = mock_shadow_manager
 
-        assert result["success"] is True
-        assert "state" in result
-        assert "is_on" in result["state"]
-        assert "brightness" in result["state"]
+        topic = "smarthome/test-device/commands/set_brightness"
+        payload = json.dumps(
+            {"request_id": "test-brightness", "parameters": {"brightness": 75}}
+        ).encode()
 
-    @pytest.mark.asyncio
-    async def test_handle_set_brightness(self, bridge, mock_bulb):
-        """Test set_brightness command handling."""
-        result = await bridge._handle_set_brightness({"brightness": 75})
-
-        assert result["success"] is True
+        await bridge._handle_command(topic, payload)
 
         status = await mock_bulb.get_status()
         assert status["brightness"] == 75
 
     @pytest.mark.asyncio
-    async def test_handle_set_brightness_missing_param(self, bridge):
+    async def test_handle_command_set_brightness_missing_param(
+        self, bridge, mock_connection, mock_shadow_manager
+    ):
         """Test set_brightness with missing brightness parameter."""
-        result = await bridge._handle_set_brightness({})
+        bridge._connection = mock_connection
+        bridge._shadow_manager = mock_shadow_manager
 
-        assert result["success"] is False
-        assert "required" in result["message"].lower()
+        topic = "smarthome/test-device/commands/set_brightness"
+        payload = json.dumps(
+            {"request_id": "test-missing", "parameters": {}}
+        ).encode()
 
-    @pytest.mark.asyncio
-    async def test_handle_set_brightness_invalid_value(self, bridge):
-        """Test set_brightness with invalid brightness value."""
-        result = await bridge._handle_set_brightness({"brightness": 150})
+        await bridge._handle_command(topic, payload)
 
-        assert result["success"] is False
+        responses = mock_connection.get_published_to("smarthome/test-device/responses/")
+        assert len(responses) == 1
+        response_data = json.loads(responses[0].payload.decode())
+        assert response_data["success"] is False
+        assert "required" in response_data["message"].lower()
 
 
 class TestIoTBridgeMessageParsing:
@@ -222,6 +250,28 @@ class TestIoTBridgeMessageParsing:
         assert response_data["success"] is False
         assert "unknown" in response_data["message"].lower()
 
+    @pytest.mark.asyncio
+    async def test_handle_command_unknown_device(
+        self, bridge, mock_connection, mock_shadow_manager
+    ):
+        """Test handling a command for an unknown device."""
+        bridge._connection = mock_connection
+        bridge._shadow_manager = mock_shadow_manager
+
+        topic = "smarthome/unknown-device/commands/turn_on"
+        payload = json.dumps({"request_id": "test-unknown"}).encode()
+
+        await bridge._handle_command(topic, payload)
+
+        responses = mock_connection.get_published_to(
+            "smarthome/unknown-device/responses/"
+        )
+        assert len(responses) == 1
+
+        response_data = json.loads(responses[0].payload.decode())
+        assert response_data["success"] is False
+        assert "unknown device" in response_data["message"].lower()
+
 
 class TestIoTBridgeShadowDelta:
     """Tests for shadow delta handling."""
@@ -265,13 +315,13 @@ class TestIoTBridgeShadowDelta:
 class TestIoTBridgeConnection:
     """Tests for connection management."""
 
-    def test_connection_failure_increases_delay(self, bridge):
-        """Test that connection failure increases reconnect delay."""
-        initial_delay = bridge._reconnect_delay
+    def test_connection_failure_increases_count(self, bridge):
+        """Test that connection failure increases failure count."""
+        assert bridge._failure_count == 0
 
         bridge._handle_connection_failure()
 
-        assert bridge._reconnect_delay == initial_delay * 2
+        assert bridge._failure_count == 1
 
     def test_max_failures_disables_bridge(self, bridge):
         """Test that max failures disables the bridge."""
@@ -282,11 +332,12 @@ class TestIoTBridgeConnection:
         assert bridge.is_disabled is True
 
     @pytest.mark.asyncio
-    async def test_on_connection_resumed_resets_delay(self, bridge):
-        """Test that successful reconnection resets the delay."""
+    async def test_on_connection_resumed_resets_failure_count(self, bridge):
+        """Test that successful reconnection resets failure count."""
         # Simulate some failures first
         bridge._handle_connection_failure()
         bridge._handle_connection_failure()
+        assert bridge._failure_count == 2
 
         # Create mock shadow manager to avoid errors in state report
         bridge._shadow_manager = MagicMock()
@@ -299,7 +350,7 @@ class TestIoTBridgeConnection:
         import asyncio
         await asyncio.sleep(0.01)
 
-        assert bridge._reconnect_delay == 1  # MIN_RECONNECT_DELAY_SEC
+        assert bridge._failure_count == 0
 
 
 class TestIoTBridgeResponsePublishing:
@@ -311,6 +362,7 @@ class TestIoTBridgeResponsePublishing:
         bridge._connection = mock_connection
 
         await bridge._publish_response(
+            device_id="test-device",
             request_id="req-123",
             success=True,
             message="Test message",
@@ -324,6 +376,7 @@ class TestIoTBridgeResponsePublishing:
 
         data = json.loads(msg.payload.decode())
         assert data["request_id"] == "req-123"
+        assert data["device_id"] == "test-device"
         assert data["success"] is True
         assert data["message"] == "Test message"
         assert data["state"]["is_on"] is True
@@ -337,6 +390,7 @@ class TestIoTBridgeResponsePublishing:
 
         # Should not raise
         await bridge._publish_response(
+            device_id="test-device",
             request_id="req-123",
             success=True,
             message="Test",

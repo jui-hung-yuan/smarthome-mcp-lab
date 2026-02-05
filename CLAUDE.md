@@ -22,8 +22,8 @@ uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
 uv run python scripts/run_bridge.py          # real bulb
 uv run python scripts/run_bridge.py --mock   # mock bulb
 
-# Provision IoT Thing and certificates (run once)
-uv run python scripts/create_iot_thing.py
+# Provision IoT Bridge Thing and certificates (run once)
+uv run python scripts/create_bridge_thing.py
 
 # Run tests
 uv run pytest tests/ -v
@@ -31,10 +31,14 @@ uv run pytest tests/ -v
 
 ## Architecture
 
-- **devices/**: Device implementations (`TapoBulb` for real hardware, `MockTapoBulb` for testing)
+- **devices/**: Device implementations with common `BaseDevice` interface
+  - `base.py`: Abstract base class defining `execute()`, `apply_desired_state()`, `get_shadow_state()`
+  - `tapo_bulb.py`: `TapoBulb` (real hardware) and `MockTapoBulb` (testing) implementations
 - **mcp_servers/**: FastMCP server definitions that expose tools to Claude Desktop
 - **logging/**: State logging (`DynamoStateLogger`) that writes device events to DynamoDB
 - **bridge/**: AWS IoT Core integration for remote control via MQTT
+  - `device_registry.py`: Manages multiple devices by ID
+  - `iot_bridge.py`: Device-agnostic MQTT bridge using `DeviceRegistry`
 
 The `TapoBulb` class persists state to `~/.smarthome/tapo_bulb_state.json`. The MCP server (`light_server.py`) creates a global bulb instance and exposes `turn_on`, `turn_off`, and `get_status` as MCP tools via the `@app.tool()` decorator.
 
@@ -43,12 +47,30 @@ The `TapoBulb` class persists state to `~/.smarthome/tapo_bulb_state.json`. The 
 The IoT Bridge (`src/smarthome/bridge/`) enables remote control via AWS IoT Core:
 
 ```
-Claude (anywhere) → IoT Core MQTT → Local Bridge → TAPO Bulb
+Claude (anywhere) → IoT Core MQTT → Local Bridge → Device Registry → Devices
 ```
 
+The bridge is **device-agnostic**: any device implementing `BaseDevice` can be registered. Commands are routed by `device_id` extracted from the MQTT topic.
+
+**Key components:**
 - **config.py**: Loads IoT endpoint and certificate paths from `~/.smarthome/iot/config.json`
+- **device_registry.py**: Manages multiple devices by ID for multi-device support
 - **shadow_manager.py**: Handles Device Shadow sync (reported/desired state)
-- **iot_bridge.py**: MQTT connection, command routing, auto-reconnect
+- **iot_bridge.py**: MQTT connection, command routing to registered devices, auto-reconnect
+
+**Shadow structure** (multi-device):
+```json
+{
+  "state": {
+    "reported": {
+      "bridge_connected": true,
+      "devices": {
+        "tapo-bulb-default": { "is_on": true, "brightness": 80, "color_temp": 2700 }
+      }
+    }
+  }
+}
+```
 
 See `docs/iot-bridge.md` for full setup instructions.
 
@@ -83,8 +105,10 @@ Logging is fire-and-forget: if DynamoDB is unreachable, the logger disables itse
 
 To enable remote control via AWS IoT Core:
 
-1. Provision IoT Thing: `uv run python scripts/create_iot_thing.py`
+1. Provision IoT Bridge Thing: `uv run python scripts/create_bridge_thing.py`
 2. Start the bridge: `uv run python scripts/run_bridge.py`
+
+The bridge Thing (`smarthome-bridge-{id}`) can manage multiple devices. Its policy allows subscribing to `smarthome/*/commands/*` for any device.
 
 Certificates are stored in `~/.smarthome/iot/`. See `docs/iot-bridge.md` for details.
 
@@ -97,81 +121,22 @@ Certificates are stored in `~/.smarthome/iot/`. See `docs/iot-bridge.md` for det
 
 ## Future Work
 
-### Multi-Device Support (Single Bridge + Registry)
+### Additional Device Types
 
-Currently one bridge manages one device. To support multiple devices efficiently:
+The `BaseDevice` pattern makes it easy to add new device types:
 
-1. Create `DeviceRegistry` class to manage multiple devices by ID
-2. Modify `IoTBridge` to accept a registry instead of a single bulb
-3. Use wildcard topic subscription: `smarthome/+/commands/+`
-4. Extract `device_id` from topic to route commands to correct device
+1. Create a new device class inheriting from `BaseDevice`
+2. Implement `execute()`, `apply_desired_state()`, `get_shadow_state()`
+3. Register it in the bridge's `DeviceRegistry`
 
-**Target structure:**
-```
-src/smarthome/
-├── devices/
-│   ├── base.py           # Abstract base class for all devices
-│   └── ...
-├── bridge/
-│   ├── device_registry.py # NEW: Manages multiple devices
-│   └── iot_bridge.py      # Modified to use registry
-```
+Example device types to add:
+- Smart plugs (on/off only, no brightness)
+- Thermostats (temperature, mode)
+- Sensors (read-only state)
 
-**Benefits:** Single MQTT connection, single certificate, easier management for 5-10+ devices.
+### Device Discovery
 
-### BaseDevice Pattern (Common Interface)
-
-Currently the bridge has bulb-specific code:
-- `_action_handlers` dict and wrapper methods like `_handle_turn_on()`
-- `_apply_desired_state()` checks for `is_on`, `brightness` fields
-- `_report_current_state()` assumes bulb state structure
-
-Instead, devices should own their actions and state via a common interface:
-
-```python
-# devices/base.py
-class BaseDevice(ABC):
-    @abstractmethod
-    async def execute(self, action: str, parameters: dict) -> dict[str, Any]:
-        """Execute action, return {"success": bool, "message": str, "state": dict}"""
-        pass
-
-    @abstractmethod
-    async def apply_desired_state(self, desired: dict[str, Any]) -> None:
-        """Apply shadow desired state. Device knows its own state fields."""
-        pass
-
-    @abstractmethod
-    async def get_shadow_state(self) -> dict[str, Any]:
-        """Get current state for shadow reporting."""
-        pass
-
-    @property
-    @abstractmethod
-    def supported_actions(self) -> list[str]:
-        """List of actions this device supports."""
-        pass
-```
-
-Each device implements these methods with its own logic. Bridge becomes a generic router:
-
-```python
-# iot_bridge.py (simplified)
-async def _handle_command(self, topic, payload):
-    device = self._registry.get(device_id)
-    result = await device.execute(action, parameters)
-
-async def _apply_desired_state(self, desired):
-    device = self._registry.get(device_id)
-    await device.apply_desired_state(desired)
-
-async def _report_current_state(self):
-    device = self._registry.get(device_id)
-    state = await device.get_shadow_state()
-    await self._shadow_manager.update_reported(state)
-```
-
-**Benefits:**
-- Adding new action = edit device only (not bridge)
-- Different device types can have different state fields (bulb has brightness, plug doesn't)
-- Bridge stays simple and generic
+Currently devices are manually registered in `run_bridge.py`. Future enhancement:
+- Auto-discover Tapo devices on local network
+- Register discovered devices automatically
+- Persist device registry to config file

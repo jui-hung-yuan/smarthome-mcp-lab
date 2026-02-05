@@ -1,14 +1,31 @@
-"""Create AWS IoT Thing with certificates and policy for the bridge.
+"""Create AWS IoT Thing for the Smart Home Bridge.
 
 Run once to provision IoT resources:
-    uv run python scripts/create_iot_thing.py
+    uv run python scripts/create_bridge_thing.py
 
 This script:
-1. Creates an IoT Thing named 'tapo-bulb-{device_id}'
+1. Creates an IoT Thing named 'smarthome-bridge-{bridge_id}'
 2. Generates certificates (certificate.pem, private.key)
 3. Downloads Amazon Root CA
-4. Creates and attaches an IoT policy with minimal permissions
+4. Creates and attaches an IoT policy allowing multi-device control
 5. Saves configuration to ~/.smarthome/iot/config.json
+
+The bridge Thing can manage multiple devices. Topic structure:
+    Commands:  smarthome/{device_id}/commands/{action}
+    Responses: smarthome/{device_id}/responses/{request_id}
+
+Shadow structure:
+    {
+      "state": {
+        "reported": {
+          "bridge_connected": true,
+          "devices": {
+            "device-1": { "is_on": true, ... },
+            "device-2": { "is_on": false, ... }
+          }
+        }
+      }
+    }
 """
 
 import argparse
@@ -21,7 +38,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-DEFAULT_DEVICE_ID = "default"
+DEFAULT_BRIDGE_ID = "home"
 REGION = os.environ.get("AWS_DEFAULT_REGION", "eu-central-1")
 ROOT_CA_URL = "https://www.amazontrust.com/repository/AmazonRootCA1.pem"
 
@@ -53,38 +70,50 @@ def create_keys_and_certificate(client) -> dict:
     return response
 
 
-def create_policy(client, policy_name: str, device_id: str) -> str:
-    """Create IoT policy with minimal permissions."""
+def create_policy(client, policy_name: str, thing_name: str) -> str:
+    """Create IoT policy with permissions for multi-device bridge.
+
+    Allows the bridge to:
+    - Connect as the bridge Thing
+    - Publish/Subscribe to any device topic under smarthome/
+    - Manage the bridge's device shadow
+    """
     policy_document = {
         "Version": "2012-10-17",
         "Statement": [
             {
                 "Effect": "Allow",
                 "Action": "iot:Connect",
-                "Resource": f"arn:aws:iot:{REGION}:*:client/tapo-bulb-{device_id}",
+                "Resource": f"arn:aws:iot:{REGION}:*:client/{thing_name}",
             },
             {
                 "Effect": "Allow",
                 "Action": ["iot:Publish"],
                 "Resource": [
-                    f"arn:aws:iot:{REGION}:*:topic/smarthome/tapo-bulb-{device_id}/responses/*",
-                    f"arn:aws:iot:{REGION}:*:topic/$aws/things/tapo-bulb-{device_id}/shadow/*",
+                    # Allow publishing responses for any device
+                    f"arn:aws:iot:{REGION}:*:topic/smarthome/*/responses/*",
+                    # Allow publishing to bridge's shadow
+                    f"arn:aws:iot:{REGION}:*:topic/$aws/things/{thing_name}/shadow/*",
                 ],
             },
             {
                 "Effect": "Allow",
                 "Action": ["iot:Subscribe"],
                 "Resource": [
-                    f"arn:aws:iot:{REGION}:*:topicfilter/smarthome/tapo-bulb-{device_id}/commands/*",
-                    f"arn:aws:iot:{REGION}:*:topicfilter/$aws/things/tapo-bulb-{device_id}/shadow/*",
+                    # Allow subscribing to commands for any device
+                    f"arn:aws:iot:{REGION}:*:topicfilter/smarthome/*/commands/*",
+                    # Allow subscribing to bridge's shadow
+                    f"arn:aws:iot:{REGION}:*:topicfilter/$aws/things/{thing_name}/shadow/*",
                 ],
             },
             {
                 "Effect": "Allow",
                 "Action": ["iot:Receive"],
                 "Resource": [
-                    f"arn:aws:iot:{REGION}:*:topic/smarthome/tapo-bulb-{device_id}/commands/*",
-                    f"arn:aws:iot:{REGION}:*:topic/$aws/things/tapo-bulb-{device_id}/shadow/*",
+                    # Allow receiving commands for any device
+                    f"arn:aws:iot:{REGION}:*:topic/smarthome/*/commands/*",
+                    # Allow receiving shadow updates
+                    f"arn:aws:iot:{REGION}:*:topic/$aws/things/{thing_name}/shadow/*",
                 ],
             },
         ],
@@ -99,6 +128,16 @@ def create_policy(client, policy_name: str, device_id: str) -> str:
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceAlreadyExistsException":
             print(f"Policy '{policy_name}' already exists.")
+            # Update the policy with a new version
+            try:
+                client.create_policy_version(
+                    policyName=policy_name,
+                    policyDocument=json.dumps(policy_document),
+                    setAsDefault=True,
+                )
+                print(f"Updated policy: {policy_name}")
+            except ClientError:
+                pass  # Policy version limit reached, that's fine
         else:
             raise
 
@@ -111,14 +150,14 @@ def attach_policy_and_thing(
     """Attach policy and thing to certificate."""
     try:
         client.attach_policy(policyName=policy_name, target=certificate_arn)
-        print(f"Attached policy to certificate.")
+        print("Attached policy to certificate.")
     except ClientError as e:
         if e.response["Error"]["Code"] != "ResourceAlreadyExistsException":
             raise
 
     try:
         client.attach_thing_principal(thingName=thing_name, principal=certificate_arn)
-        print(f"Attached certificate to thing.")
+        print("Attached certificate to thing.")
     except ClientError as e:
         if e.response["Error"]["Code"] != "ResourceAlreadyExistsException":
             raise
@@ -166,10 +205,10 @@ def save_config(
     config_dir: Path,
     endpoint: str,
     thing_name: str,
-    device_id: str,
     cert_path: Path,
     key_path: Path,
     ca_path: Path,
+    default_device_id: str,
 ) -> Path:
     """Save IoT configuration to JSON file."""
     config_path = config_dir / "config.json"
@@ -177,7 +216,9 @@ def save_config(
     config = {
         "endpoint": endpoint,
         "thing_name": thing_name,
-        "device_id": thing_name,  # Use thing_name to match policy topic patterns
+        # device_id is the default device to register (for single-device mode)
+        # The bridge can manage multiple devices
+        "device_id": default_device_id,
         "cert_path": str(cert_path),
         "key_path": str(key_path),
         "root_ca_path": str(ca_path),
@@ -191,12 +232,17 @@ def save_config(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create AWS IoT Thing with certificates for smart home bridge"
+        description="Create AWS IoT Thing for Smart Home Bridge (multi-device)"
     )
     parser.add_argument(
-        "--device-id",
-        default=DEFAULT_DEVICE_ID,
-        help=f"Device ID suffix (default: {DEFAULT_DEVICE_ID})",
+        "--bridge-id",
+        default=DEFAULT_BRIDGE_ID,
+        help=f"Bridge ID suffix (default: {DEFAULT_BRIDGE_ID})",
+    )
+    parser.add_argument(
+        "--default-device",
+        default="tapo-bulb-default",
+        help="Default device ID to register (default: tapo-bulb-default)",
     )
     parser.add_argument(
         "--output-dir",
@@ -205,15 +251,15 @@ def main():
     )
     args = parser.parse_args()
 
-    device_id = args.device_id
-    thing_name = f"tapo-bulb-{device_id}"
-    policy_name = f"tapo-bulb-{device_id}-policy"
+    bridge_id = args.bridge_id
+    thing_name = f"smarthome-bridge-{bridge_id}"
+    policy_name = f"smarthome-bridge-{bridge_id}-policy"
 
     output_dir = Path(args.output_dir).expanduser()
-    cert_dir = output_dir / thing_name
+    cert_dir = output_dir
 
-    print(f"Provisioning IoT resources for device: {device_id}")
-    print(f"Thing name: {thing_name}")
+    print(f"Provisioning IoT Bridge: {thing_name}")
+    print(f"Default device: {args.default_device}")
     print(f"Output directory: {output_dir}")
     print()
 
@@ -239,10 +285,10 @@ def main():
             output_dir,
             endpoint,
             thing_name,
-            device_id,
             cert_dir / "certificate.pem",
             cert_dir / "private.key",
             cert_dir / "AmazonRootCA1.pem",
+            args.default_device,
         )
         print(f"\nConfiguration updated: {config_path}")
         return
@@ -254,7 +300,7 @@ def main():
     private_key = cert_response["keyPair"]["PrivateKey"]
 
     # Create policy
-    create_policy(client, policy_name, device_id)
+    create_policy(client, policy_name, thing_name)
 
     # Attach policy and thing to certificate
     attach_policy_and_thing(client, policy_name, certificate_arn, thing_name)
@@ -266,21 +312,27 @@ def main():
 
     # Save configuration
     config_path = save_config(
-        output_dir, endpoint, thing_name, device_id, cert_path, key_path, ca_path
+        output_dir, endpoint, thing_name, cert_path, key_path, ca_path, args.default_device
     )
 
     print()
     print("=" * 60)
-    print("IoT Thing provisioned successfully!")
+    print("IoT Bridge provisioned successfully!")
+    print()
+    print(f"Thing name: {thing_name}")
+    print(f"Default device: {args.default_device}")
     print()
     print("To start the bridge:")
-    print(f"  uv run python scripts/run_bridge.py")
+    print("  uv run python scripts/run_bridge.py")
     print()
     print("To test with a command (requires aws-cli):")
     print(f'  aws iot-data publish \\')
-    print(f'    --topic "smarthome/{thing_name}/commands/turn_on" \\')
+    print(f'    --topic "smarthome/{args.default_device}/commands/turn_on" \\')
     print(f'    --payload \'{{"request_id":"test-1","parameters":{{}}}}\' \\')
     print(f'    --cli-binary-format raw-in-base64-out')
+    print()
+    print("Shadow will show device states at:")
+    print(f"  AWS Console > IoT Core > Things > {thing_name} > Device Shadows")
     print("=" * 60)
 
 
