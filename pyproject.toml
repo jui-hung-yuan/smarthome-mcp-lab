@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "awsiotsdk>=1.28.0",
     "boto3>=1.42.39",
     "fastmcp>=2.14.3",
     "pydantic>=2.12.5",

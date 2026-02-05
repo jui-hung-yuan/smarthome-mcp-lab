@@ -10,6 +10,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Real bulb control** - connect to a physical TAPO L530E via local network using the `tapo` library
 - **Mock fallback** - automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
 - **DynamoDB state logging** - every state change on a real bulb is logged to DynamoDB for historical analysis (fire-and-forget, never breaks MCP tools)
+- **AWS IoT Core integration** - remote control via MQTT with Device Shadow for state sync
 
 ## Project Structure
 
@@ -18,17 +19,26 @@ smarthome/
 ├── src/
 │   └── smarthome/
 │       ├── devices/
-│       │   └── tapo_bulb.py      # Real + mock TAPO bulb implementations
+│       │   └── tapo_bulb.py       # Real + mock TAPO bulb implementations
 │       ├── logging/
 │       │   └── dynamo_logger.py   # DynamoDB state change logger
+│       ├── bridge/
+│       │   ├── config.py          # IoT config loader
+│       │   ├── shadow_manager.py  # Device Shadow operations
+│       │   └── iot_bridge.py      # AWS IoT Core MQTT bridge
 │       └── mcp_servers/
 │           └── light_server.py    # FastMCP server
 ├── scripts/
-│   └── create_dynamodb_table.py   # One-time DynamoDB table setup
+│   ├── create_dynamodb_table.py   # One-time DynamoDB table setup
+│   ├── create_iot_thing.py        # IoT Thing provisioning
+│   └── run_bridge.py              # IoT Bridge entry point
+├── docs/
+│   └── iot-bridge.md              # IoT Bridge documentation
 ├── tests/
-│   ├── test_dynamo_logger.py      # DynamoDB logger tests (moto)
-│   ├── test_light_server.py       # MCP server tool tests
-│   └── test_mock_tapo_bulb.py     # Mock device tests
+│   ├── mocks/                     # Test mocks
+│   ├── test_iot_bridge.py         # IoT Bridge tests
+│   ├── test_shadow_manager.py     # Shadow manager tests
+│   └── ...                        # Other tests
 ├── pyproject.toml
 └── README.md
 ```
@@ -148,6 +158,39 @@ AWS credentials are read from the `self` profile in `~/.aws/credentials` (not fr
 
 If DynamoDB is not configured, the logger silently disables itself on first failure — no impact on MCP tools.
 
+### 5. Set Up IoT Bridge for Remote Control (Optional)
+
+The IoT Bridge enables remote control via AWS IoT Core MQTT.
+
+**Provision IoT resources:**
+
+```bash
+uv run python scripts/create_iot_thing.py
+```
+
+This creates an IoT Thing, certificates, and policy in AWS.
+
+**Start the bridge:**
+
+```bash
+# With real bulb
+uv run python scripts/run_bridge.py
+
+# With mock bulb (for testing)
+uv run python scripts/run_bridge.py --mock
+```
+
+**Test via AWS CLI:**
+
+```bash
+aws iot-data publish \
+  --topic "smarthome/tapo-bulb-default/commands/turn_on" \
+  --payload '{"request_id":"test-1","parameters":{}}' \
+  --cli-binary-format raw-in-base64-out
+```
+
+See `docs/iot-bridge.md` for full documentation.
+
 ## Next Steps
 
 - [ ] Add color temperature control
@@ -196,6 +239,7 @@ uv run pytest tests/ -v
 | `fastmcp` | MCP server framework |
 | `tapo` | TAPO device control over local network |
 | `boto3` | AWS SDK for DynamoDB state logging |
+| `awsiotsdk` | AWS IoT Core MQTT client |
 | `moto` (dev) | In-memory AWS mock for testing |
 
 ## License

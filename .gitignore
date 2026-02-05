@@ -13,3 +13,8 @@ backup/
 
 # Credentials
 .env
+
+# IoT certificates (never commit private keys)
+certs/
+*.pem
+*.key
