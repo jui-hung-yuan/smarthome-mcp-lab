@@ -23,7 +23,8 @@ class DynamoStateLogger:
     After any connection/table failure, sets ``_disabled`` to avoid retrying.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, profile_name: str | None = None) -> None:
+        self._profile_name = profile_name
         self._table = None
         self._disabled = False
 
@@ -35,7 +36,11 @@ class DynamoStateLogger:
         table_name = os.environ.get("DYNAMODB_TABLE_NAME", DEFAULT_TABLE_NAME)
         region = os.environ.get("AWS_DEFAULT_REGION", DEFAULT_REGION)
 
-        session = boto3.Session(profile_name="self", region_name=region)
+        session_kwargs = {"region_name": region}
+        if self._profile_name:
+            session_kwargs["profile_name"] = self._profile_name
+
+        session = boto3.Session(**session_kwargs)
         dynamodb = session.resource("dynamodb")
         self._table = dynamodb.Table(table_name)
         return self._table

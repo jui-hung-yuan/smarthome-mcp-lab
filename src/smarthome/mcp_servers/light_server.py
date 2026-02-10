@@ -26,7 +26,7 @@ ENV_FILE = Path.home() / ".smarthome" / ".env"
 bulb = None
 
 # State logger (fire-and-forget)
-state_logger = DynamoStateLogger()
+state_logger = DynamoStateLogger(profile_name="self")
 DEVICE_ID = "tapo-bulb-default"
 
 
