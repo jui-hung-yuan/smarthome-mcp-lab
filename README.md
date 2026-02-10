@@ -1,18 +1,19 @@
 # Smart Home MCP Lab
 
-A personal learning exercise for exploring MCP (Model Context Protocol) and agent development. Uses smart home control (TAPO L530E light bulbs) as a hands-on example for building and testing MCP servers with Claude Desktop.
+A personal learning exercise for exploring MCP (Model Context Protocol) and agent development. Uses smart home control (TAPO L530E light bulbs) as a hands-on example for building and testing MCP servers — both locally via Claude Desktop and remotely via Claude web app.
 
 ## Features
 
-- **Turn lights on/off** via Claude Desktop
-- **Get bulb status** (on/off, brightness, color temperature)
-- **Persistent state** - bulb state survives server restarts
-- **Real bulb control** - connect to a physical TAPO L530E via local network using the `tapo` library
-- **Mock fallback** - automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
-- **DynamoDB state logging** - every state change on a real bulb is logged to DynamoDB for historical analysis (fire-and-forget, never breaks MCP tools)
-- **AWS IoT Core integration** - remote control via MQTT with Device Shadow for state sync
-- **Multi-device support** - single bridge manages multiple devices via `DeviceRegistry`
-- **Device-agnostic architecture** - `BaseDevice` interface allows easy addition of new device types
+- **Two MCP paths** — control lights from Claude Desktop (local) or Claude web app (remote)
+- **Turn lights on/off** and **get bulb status** (on/off, brightness, color temperature)
+- **Real bulb control** — connect to a physical TAPO L530E via local network using the `tapo` library
+- **Mock fallback** — automatically falls back to a mock implementation when credentials are missing or the bulb is unreachable
+- **Persistent state** — bulb state survives server restarts
+- **DynamoDB state logging** — every state change on a real bulb is logged to DynamoDB (fire-and-forget, never breaks MCP tools)
+- **AWS IoT Core integration** — remote control via MQTT with Device Shadow for state sync
+- **AgentCore Gateway** — remote MCP server with Cognito OAuth for Claude web app
+- **Multi-device support** — single bridge manages multiple devices via `DeviceRegistry`
+- **Device-agnostic architecture** — `BaseDevice` interface allows easy addition of new device types
 
 ## Project Structure
 
@@ -30,41 +31,115 @@ smarthome/
 │       │   ├── device_registry.py # Multi-device registry
 │       │   ├── shadow_manager.py  # Device Shadow operations
 │       │   └── iot_bridge.py      # Device-agnostic MQTT bridge
-│       └── mcp_servers/
-│           └── light_server.py    # FastMCP server
+│       ├── cloud/
+│       │   └── iot_commands.py    # IoT Core command client (MQTT + shadow)
+│       ├── mcp_servers/
+│       │   └── light_server.py    # FastMCP server (local MCP)
+│       └── lambda_handler.py      # Lambda entry point (remote MCP)
 ├── scripts/
-│   ├── create_dynamodb_table.py   # One-time DynamoDB table setup
-│   ├── create_bridge_thing.py     # IoT Bridge Thing provisioning
-│   └── run_bridge.py              # IoT Bridge entry point
+│   ├── create_dynamodb_table.py       # One-time DynamoDB table setup
+│   ├── create_bridge_thing.py         # IoT Bridge Thing provisioning
+│   ├── run_bridge.py                  # IoT Bridge entry point
+│   ├── create_cognito.py              # Cognito User Pool + OAuth clients
+│   ├── create_lambda.py               # Lambda function provisioning
+│   ├── create_agentcore_gateway.py    # AgentCore Gateway provisioning
+│   ├── package_lambda.py              # Build Lambda deployment package
+│   └── test_gateway.py                # End-to-end gateway connectivity test
 ├── docs/
-│   └── iot-bridge.md              # IoT Bridge documentation
+│   ├── iot-bridge.md              # IoT Bridge documentation
+│   └── claude-web-oauth.md        # Claude web app OAuth integration notes
 ├── tests/
 │   ├── mocks/                     # Test mocks
 │   ├── test_base_device.py        # BaseDevice interface tests
 │   ├── test_device_registry.py    # DeviceRegistry tests
 │   ├── test_iot_bridge.py         # IoT Bridge tests
+│   ├── test_iot_commands.py       # IoT Core command client tests
+│   ├── test_lambda_handler.py     # Lambda handler tests
 │   ├── test_shadow_manager.py     # Shadow manager tests
 │   └── ...                        # Other tests
 ├── pyproject.toml
 └── README.md
 ```
 
+## How It Works
+
+### Local MCP (Claude Desktop)
+
+Claude Desktop runs the FastMCP server as a local subprocess and calls tools directly:
+
+```
+Claude Desktop → FastMCP Server (subprocess) → TapoBulb → Real Bulb (local network)
+                                              → MockTapoBulb (fallback)
+```
+
+The MCP server exposes these tools:
+- `turn_on()` / `turn_off()` — control the bulb
+- `set_brightness(level)` — set brightness (0-100)
+- `get_status()` — get current bulb state (includes mode: real/mock)
+
+On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing or the connection fails, it falls back to the mock.
+
+### Remote MCP (Claude Web App)
+
+Claude web app connects through the cloud path via AgentCore Gateway:
+
+```
+Claude Web App → Cognito (OAuth) → AgentCore Gateway → Lambda → IoT Core → Local Bridge → Real Bulb
+```
+
+Each component's role:
+- **Cognito** — OAuth authentication (authorization_code flow for Claude web, client_credentials for testing)
+- **AgentCore Gateway** — remote MCP server that validates JWT tokens and routes tool calls to Lambda
+- **Lambda** — stateless handler that maps MCP tool invocations to IoT Core MQTT commands
+- **IoT Core** — MQTT broker that routes commands to the local bridge
+- **Local Bridge** — runs on-premises, receives MQTT commands and controls devices via `DeviceRegistry`
+
+See `docs/claude-web-oauth.md` for OAuth integration details and `docs/iot-bridge.md` for bridge details.
+
+### Device Layer
+
+All devices implement a common `BaseDevice` abstract class with:
+- `execute(action, parameters)` — execute any action (turn_on, set_brightness, etc.)
+- `apply_desired_state(desired)` — apply state from IoT Shadow
+- `get_shadow_state()` — get current state for shadow reporting
+
+**TapoBulb** connects to a physical TAPO L530E over the local network. **MockTapoBulb** simulates a bulb for development, persisting state to `~/.smarthome/tapo_bulb_state.json`.
+
+### DynamoDB Logging
+
+When using a real bulb, every state change is logged to a DynamoDB table. Logging is fire-and-forget — if DynamoDB is unreachable the logger disables itself and tools continue working normally. Mock bulb operations are not logged.
+
 ## Setup
 
-### 1. Install Dependencies
+### Prerequisites
+
+- [uv](https://docs.astral.sh/uv/) for dependency management
+- AWS credentials via the `self` profile in `~/.aws/credentials` (for DynamoDB, IoT Core, Lambda, Cognito, AgentCore)
+
+### Device Setup
+
+Create `~/.smarthome/.env` with your Tapo credentials:
+
+```
+TAPO_USERNAME=your_tapo_email
+TAPO_PASSWORD=your_tapo_password
+TAPO_IP_ADDRESS=192.168.x.x
+```
+
+If this file is missing or the bulb is unreachable, the server automatically falls back to mock mode.
+
+### Local MCP Setup (Claude Desktop)
+
+1. Install dependencies:
 
 ```bash
 uv add fastmcp pydantic tapo python-dotenv boto3
 ```
 
-### 2. Configure Claude Desktop
-
-Edit your Claude Desktop config file at:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-Add this configuration:
+2. Edit your Claude Desktop config file at:
+   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+   - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -84,169 +159,97 @@ Add this configuration:
 }
 ```
 
-**Important**: Replace `/path/to/your/smarthome` with the absolute path to your project directory.
+3. Restart Claude Desktop.
 
-### 3. Restart Claude Desktop
+### Remote MCP Setup (Claude Web App)
 
-Quit and restart Claude Desktop completely for the config changes to take effect.
+Provision cloud resources in this order:
 
-## Usage
-
-Once configured, you can control your light through Claude Desktop with natural language:
-
-- "Turn on my light"
-- "Turn off the bulb"
-- "What's the status of my light?"
-- "Is my light on?"
-
-## How It Works
-
-### Device Layer
-
-1. **BaseDevice Interface**: All devices implement a common `BaseDevice` abstract class with:
-   - `execute(action, parameters)` - Execute any action (turn_on, set_brightness, etc.)
-   - `apply_desired_state(desired)` - Apply state from IoT Shadow
-   - `get_shadow_state()` - Get current state for shadow reporting
-   - `supported_actions` - List of actions the device supports
-
-2. **Real Bulb (`TapoBulb`)**: Connects to a physical TAPO L530E over the local network using the `tapo` library. State is read directly from the device via its HTTP API on each request.
-
-3. **Mock Bulb (`MockTapoBulb`)**: Simulates a TAPO bulb for development and testing. State is persisted to `~/.smarthome/tapo_bulb_state.json` so it survives server restarts.
-
-4. **Automatic Fallback**: On first tool call, the server tries to connect to a real bulb using credentials from `~/.smarthome/.env`. If the file is missing, incomplete, or the connection fails, it falls back to the mock. The `get_status` tool reports which mode is active.
-
-### MCP Server
-
-5. **MCP Server**: FastMCP exposes tools that Claude can use:
-   - `turn_on()` - Turn the bulb on
-   - `turn_off()` - Turn the bulb off
-   - `set_brightness(level)` - Set brightness (0-100)
-   - `get_status()` - Get current bulb state (includes mode: real/mock)
-
-6. **Claude Desktop**: Connects to the MCP server and calls tools based on your requests
-
-### IoT Bridge (Remote Control)
-
-7. **DeviceRegistry**: Manages multiple devices by ID, enabling a single bridge to control many devices.
-
-8. **IoT Bridge**: Device-agnostic MQTT bridge that:
-   - Subscribes to `smarthome/{device_id}/commands/{action}` for each registered device
-   - Routes commands to devices via `device.execute()`
-   - Reports device states to IoT Shadow under `devices.{device_id}`
-
-9. **DynamoDB Logging**: When using a real bulb, every `turn_on`, `turn_off`, and `set_brightness` call logs the resulting state to a DynamoDB table. Logging is fire-and-forget — if DynamoDB is unreachable the logger disables itself and tools continue working normally. Mock bulb operations are not logged.
-
-## Testing
-
-### Without Claude Desktop
-
-You can test the MCP server directly:
-
-```bash
-uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
-```
-
-This opens an interactive testing interface where you can call tools and inspect responses.
-
-### Check Bulb Connectivity
-
-If the server falls back to mock mode unexpectedly, use these commands to diagnose network issues:
-
-```bash
-# Check if the bulb is reachable on the local network
-ping 192.168.178.196
-
-# Verify the route to the bulb's IP goes through the correct network interface
-route get 192.168.178.196
-
-# Scan the local subnet to discover connected devices (requires nmap)
-nmap -sn 192.168.178.0/24
-```
-
-Replace the IP address with your bulb's actual IP. The `tapo` library communicates with the bulb directly over the local network (HTTP on port 80), so the bulb and your machine must be on the same network segment.
-
-### 4. Set Up DynamoDB State Logging (Optional)
-
-State logging requires AWS credentials via the `self` profile in `~/.aws/credentials` and a DynamoDB table.
-
-**Create the table:**
+**1. DynamoDB table (optional — state logging):**
 
 ```bash
 uv run python scripts/create_dynamodb_table.py
 ```
 
-This creates a `smarthome-state-log` table with PAY_PER_REQUEST billing and a 30-day TTL.
-
-**Environment variables (all optional):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DYNAMODB_TABLE_NAME` | `smarthome-state-log` | DynamoDB table name |
-| `AWS_DEFAULT_REGION` | `eu-central-1` | AWS region |
-
-AWS credentials are read from the `self` profile in `~/.aws/credentials` (not from `~/.smarthome/.env`).
-
-If DynamoDB is not configured, the logger silently disables itself on first failure — no impact on MCP tools.
-
-### 5. Set Up IoT Bridge for Remote Control (Optional)
-
-The IoT Bridge enables remote control via AWS IoT Core MQTT. The bridge is device-agnostic and supports multiple devices through a `DeviceRegistry`.
-
-**Provision IoT Bridge:**
+**2. IoT Bridge Thing + start bridge:**
 
 ```bash
 uv run python scripts/create_bridge_thing.py
+uv run python scripts/run_bridge.py          # real bulb
+uv run python scripts/run_bridge.py --mock   # mock bulb (testing)
 ```
 
-This creates:
-- An IoT Thing (`smarthome-bridge-home`) representing the bridge
-- Certificates for secure MQTT connection
-- A policy allowing multi-device control (`smarthome/*/commands/*`)
-
-**Start the bridge:**
+**3. Cognito (user pool, both OAuth clients, user):**
 
 ```bash
-# With real bulb
-uv run python scripts/run_bridge.py
-
-# With mock bulb (for testing)
-uv run python scripts/run_bridge.py --mock
+uv run python scripts/create_cognito.py
 ```
 
-**Test via AWS CLI:**
+Creates an M2M client (for `test_gateway.py`) and a Claude web client (for Claude's MCP connector). Saves config to `~/.smarthome/cognito_config.json`.
+
+**4. Lambda:**
 
 ```bash
-aws iot-data publish \
-  --topic "smarthome/tapo-bulb-default/commands/turn_on" \
-  --payload '{"request_id":"test-1","parameters":{}}' \
-  --cli-binary-format raw-in-base64-out
+uv run python scripts/package_lambda.py
+uv run python scripts/create_lambda.py
 ```
 
-**Shadow structure** (multi-device):
+**5. AgentCore Gateway:**
 
-```json
-{
-  "state": {
-    "reported": {
-      "bridge_connected": true,
-      "devices": {
-        "tapo-bulb-default": {
-          "is_on": true,
-          "brightness": 80,
-          "color_temp": 2700,
-          "device_reachable": true
-        }
-      }
-    }
-  }
-}
+```bash
+uv run python scripts/create_agentcore_gateway.py
 ```
 
-See `docs/iot-bridge.md` for full documentation.
+**6. Connect from Claude web app:**
+
+Add the gateway URL as an MCP connector in Claude web app settings. Use the Claude web client ID and secret from `~/.smarthome/cognito_config.json` for OAuth.
+
+## Testing
+
+### Local Testing
+
+Test the MCP server interactively (no Claude Desktop needed):
+
+```bash
+uv run fastmcp dev src/smarthome/mcp_servers/light_server.py
+```
+
+### Remote Testing
+
+End-to-end connectivity test (OAuth token → MCP initialize → list tools → invoke tool):
+
+```bash
+uv run python scripts/test_gateway.py
+```
+
+### Unit Tests
+
+```bash
+uv run pytest tests/ -v
+```
+
+### Check Bulb Connectivity
+
+If the server falls back to mock mode unexpectedly:
+
+```bash
+# Check if the bulb is reachable on the local network
+ping 192.168.178.196
+
+# Verify the route to the bulb's IP
+route get 192.168.178.196
+
+# Scan the local subnet (requires nmap)
+nmap -sn 192.168.178.0/24
+```
+
+Replace the IP address with your bulb's actual IP.
 
 ## Next Steps
 
 - [x] ~~Add multiple bulb support~~ (Done: `DeviceRegistry` + device-agnostic bridge)
+- [x] ~~IoT Bridge for remote control~~ (Done: MQTT bridge with Device Shadow)
+- [x] ~~AgentCore Gateway + Claude web app~~ (Done: OAuth with Cognito, see `docs/claude-web-oauth.md`)
 - [ ] Add color temperature control
 - [ ] Add RGB color control
 - [ ] Add additional device types (smart plugs, sensors)
@@ -277,7 +280,7 @@ The bulb state is saved to `~/.smarthome/tapo_bulb_state.json`. You can:
 # Add new dependency
 uv add package-name
 
-# Run server
+# Run local MCP server
 uv run fastmcp run src/smarthome/mcp_servers/light_server.py
 
 # Run with dev mode (interactive testing)
@@ -293,7 +296,7 @@ uv run pytest tests/ -v
 |---------|---------|
 | `fastmcp` | MCP server framework |
 | `tapo` | TAPO device control over local network |
-| `boto3` | AWS SDK for DynamoDB state logging |
+| `boto3` | AWS SDK for DynamoDB, IoT Core, Lambda, Cognito |
 | `awsiotsdk` | AWS IoT Core MQTT client |
 | `moto` (dev) | In-memory AWS mock for testing |
 

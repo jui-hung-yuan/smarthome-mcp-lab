@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Smart Home MCP Server for controlling TAPO L530E smart light bulbs through Claude Desktop. Uses the `tapo` Python library for real device control, with automatic fallback to a mock implementation when credentials are unavailable.
+Smart Home MCP Server for controlling TAPO L530E smart light bulbs through two MCP paths:
+
+- **Local MCP (Claude Desktop)**: FastMCP server runs as a subprocess, controlling the bulb directly over the local network
+- **Remote MCP (Claude Web App)**: AgentCore Gateway with Cognito OAuth → Lambda → IoT Core → local bridge → real bulb
+
+Uses the `tapo` Python library for real device control, with automatic fallback to a mock implementation when credentials are unavailable.
 
 ## Commands
 
@@ -27,6 +32,17 @@ uv run python scripts/create_bridge_thing.py
 
 # Run tests
 uv run pytest tests/ -v
+
+# Build Lambda package for AgentCore Gateway
+uv run python scripts/package_lambda.py
+
+# Provision cloud resources (run in order)
+uv run python scripts/create_cognito.py
+uv run python scripts/create_lambda.py
+uv run python scripts/create_agentcore_gateway.py
+
+# Test gateway connectivity
+uv run python scripts/test_gateway.py
 ```
 
 ## Architecture
@@ -39,6 +55,8 @@ uv run pytest tests/ -v
 - **bridge/**: AWS IoT Core integration for remote control via MQTT
   - `device_registry.py`: Manages multiple devices by ID
   - `iot_bridge.py`: Device-agnostic MQTT bridge using `DeviceRegistry`
+- **cloud/**: Cloud-side modules for AWS Lambda integration
+  - `iot_commands.py`: Generic IoT Core command client (publish MQTT + read shadow)
 
 The `TapoBulb` class persists state to `~/.smarthome/tapo_bulb_state.json`. The MCP server (`light_server.py`) creates a global bulb instance and exposes `turn_on`, `turn_off`, and `get_status` as MCP tools via the `@app.tool()` decorator.
 
@@ -73,6 +91,28 @@ The bridge is **device-agnostic**: any device implementing `BaseDevice` can be r
 ```
 
 See `docs/iot-bridge.md` for full setup instructions.
+
+### AgentCore Gateway (Cloud Path)
+
+The AgentCore Gateway exposes tools as a remote MCP server for Claude web app:
+
+```
+Claude Web App → AgentCore Gateway (OAuth/Cognito) → Lambda → IoT Core → Local Bridge → Real Bulb
+```
+
+**Key components:**
+- **cloud/iot_commands.py**: Stateless functions that publish MQTT commands and read Device Shadow via boto3 `iot-data`
+- **lambda_handler.py**: Lambda entry point that maps AgentCore tool invocations to IoT commands
+- **scripts/create_cognito.py**: Provisions Cognito User Pool, resource server, two app clients (M2M + Claude web authorization_code), and a Cognito user
+- **scripts/create_lambda.py**: Provisions IAM role + Lambda function
+- **scripts/create_agentcore_gateway.py**: Provisions gateway with CUSTOM_JWT auth and Lambda target with inline tool schemas
+- **scripts/test_gateway.py**: End-to-end connectivity test (OAuth token → MCP initialize → list tools → invoke tool)
+
+**Config files** (in `~/.smarthome/`):
+- `cognito_config.json`: M2M client ID/secret, Claude web client ID/secret, discovery URL, token endpoint
+- `gateway_config.json`: Gateway ID, URL, ARN
+
+The Lambda handler also accepts `tool_name` in the event body as a fallback for AWS Console testing.
 
 ## Setup
 
