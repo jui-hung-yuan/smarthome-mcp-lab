@@ -7,6 +7,9 @@ Tests step by step:
 4. Send MCP initialize request
 5. List available tools
 6. Invoke get_status tool
+7. Invoke turn_on tool
+
+Reports round-trip latency for each request and prints a summary at the end.
 
 Usage:
     uv run python scripts/test_gateway.py
@@ -15,6 +18,7 @@ Usage:
 import base64
 import json
 import sys
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -60,8 +64,8 @@ def get_oauth_token(cognito_config: dict) -> str:
     return result["access_token"]
 
 
-def test_url(url: str, token: str, payload: dict, description: str) -> dict | None:
-    """Send a POST request and return the response."""
+def test_url(url: str, token: str, payload: dict, description: str) -> tuple[dict | None, float]:
+    """Send a POST request and return the response and latency in ms."""
     print(f"\n--- {description} ---")
     print(f"  URL: {url}")
 
@@ -78,24 +82,29 @@ def test_url(url: str, token: str, payload: dict, description: str) -> dict | No
     )
 
     try:
+        t0 = time.monotonic()
         response = urllib.request.urlopen(req)
         body = response.read().decode()
+        latency_ms = (time.monotonic() - t0) * 1000
         print(f"  Status: {response.status}")
+        print(f"  Latency: {latency_ms:.0f} ms")
         print(f"  Headers: {dict(response.headers)}")
         print(f"  Body: {body[:500]}")
         try:
-            return json.loads(body)
+            return json.loads(body), latency_ms
         except json.JSONDecodeError:
-            return {"raw": body}
+            return {"raw": body}, latency_ms
     except urllib.error.HTTPError as e:
+        latency_ms = (time.monotonic() - t0) * 1000
         body = e.read().decode() if e.readable() else ""
         print(f"  HTTP Error: {e.code} {e.reason}")
+        print(f"  Latency: {latency_ms:.0f} ms")
         print(f"  Headers: {dict(e.headers)}")
         print(f"  Body: {body[:500]}")
-        return None
+        return None, latency_ms
     except Exception as e:
         print(f"  Error: {type(e).__name__}: {e}")
-        return None
+        return None, 0.0
 
 
 def build_candidate_urls(gateway_config: dict) -> list[tuple[str, str]]:
@@ -164,7 +173,7 @@ def main():
 
     working_url = None
     for url, label in urls:
-        result = test_url(url, token, mcp_initialize, f"MCP initialize → {label}")
+        result, _ = test_url(url, token, mcp_initialize, f"MCP initialize → {label}")
         if result is not None:
             working_url = url
             print(f"\n  >>> '{label}' works!")
@@ -185,7 +194,7 @@ def main():
 
     # Step 5: Invoke get_status
     print("\n[5] Invoking get_status tool...")
-    mcp_call_tool = {
+    mcp_get_status = {
         "jsonrpc": "2.0",
         "id": 3,
         "method": "tools/call",
@@ -194,9 +203,37 @@ def main():
             "arguments": {},
         },
     }
-    test_url(working_url, token, mcp_call_tool, "MCP tools/call → get_status")
+    _, get_status_latency = test_url(
+        working_url, token, mcp_get_status, "MCP tools/call → get_status"
+    )
 
+    # Step 6: Invoke turn_on
+    print("\n[6] Invoking turn_on tool...")
+    mcp_turn_on = {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "smarthome-light___turn_on",
+            "arguments": {},
+        },
+    }
+    _, turn_on_latency = test_url(
+        working_url, token, mcp_turn_on, "MCP tools/call → turn_on"
+    )
+
+    # Latency summary
     print("\n" + "=" * 60)
+    print("Latency Summary")
+    print("-" * 40)
+    print(f"  {'Tool':<20} {'Round-trip':>10}")
+    print(f"  {'-'*20} {'-'*10}")
+    for tool, ms in [("get_status", get_status_latency), ("turn_on", turn_on_latency)]:
+        value = f"{ms:.0f} ms" if ms > 0 else "N/A"
+        print(f"  {tool:<20} {value:>10}")
+    print()
+
+    print("=" * 60)
     print("Test complete.")
     if working_url:
         print(f"\nWorking URL for Claude web app connector:")
