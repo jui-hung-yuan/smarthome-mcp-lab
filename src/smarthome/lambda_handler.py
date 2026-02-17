@@ -61,7 +61,7 @@ def lambda_handler(event, context):
     """Main Lambda handler for AgentCore Gateway tool invocations.
 
     Args:
-        event: Tool input parameters (e.g. {"level": 80} for set_brightness)
+        event: Tool input parameters (e.g. {"brightness": 80} for set_brightness)
         context: Lambda context with client_context.custom['bedrockAgentCoreToolName']
 
     Returns:
@@ -73,7 +73,7 @@ def lambda_handler(event, context):
     if tool_name in COMMAND_TOOLS:
         parameters = {}
         if tool_name == "set_brightness":
-            parameters["level"] = event.get("level", 100)
+            parameters["brightness"] = event.get("brightness", 100)
 
         result = send_command(
             device_id=DEVICE_ID,

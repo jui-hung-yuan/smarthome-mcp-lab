@@ -95,12 +95,12 @@ TOOL_SCHEMAS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "level": {
+                "brightness": {
                     "type": "integer",
                     "description": "Brightness level from 0 to 100",
                 },
             },
-            "required": ["level"],
+            "required": ["brightness"],
         },
         "outputSchema": {
             "type": "object",
@@ -321,7 +321,42 @@ def create_gateway_target(session, gateway_id: str, lambda_arn: str) -> dict:
     if existing:
         target_id = existing["targetId"]
         print(f"Target '{TARGET_NAME}' already exists: {target_id}")
-        return existing
+        print("Updating target with current tool schemas...")
+        client.update_gateway_target(
+            gatewayIdentifier=gateway_id,
+            targetId=target_id,
+            name=TARGET_NAME,
+            description="Smart light bulb control via IoT Core bridge",
+            targetConfiguration={
+                "mcp": {
+                    "lambda": {
+                        "lambdaArn": lambda_arn,
+                        "toolSchema": {
+                            "inlinePayload": TOOL_SCHEMAS,
+                        },
+                    }
+                }
+            },
+            credentialProviderConfigurations=[
+                {"credentialProviderType": "GATEWAY_IAM_ROLE"}
+            ],
+        )
+
+        # Wait for update to complete
+        print("Waiting for target update to complete...")
+        while True:
+            tgt = client.get_gateway_target(
+                gatewayIdentifier=gateway_id, targetId=target_id
+            )
+            status = tgt["status"]
+            if status == "READY":
+                print("Target is READY.")
+                return tgt
+            elif status in ("FAILED", "UPDATE_UNSUCCESSFUL"):
+                reasons = tgt.get("statusReasons", [])
+                raise RuntimeError(f"Target update failed: {status} — {reasons}")
+            print(f"  Status: {status}, waiting...")
+            time.sleep(5)
 
     response = client.create_gateway_target(
         gatewayIdentifier=gateway_id,

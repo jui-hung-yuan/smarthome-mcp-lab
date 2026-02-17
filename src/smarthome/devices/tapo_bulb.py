@@ -20,6 +20,13 @@ class MockTapoBulb(BaseDevice):
     State is persisted to a JSON file so it survives server restarts.
     """
 
+    ACTION_PARAMS = {
+        "turn_on": [],
+        "turn_off": [],
+        "set_brightness": ["brightness"],
+        "get_status": [],
+    }
+
     def __init__(self, state_file: Path):
         self.state_file = state_file
         self.state = self._load_state()
@@ -152,6 +159,13 @@ class MockTapoBulb(BaseDevice):
 
 class TapoBulb(BaseDevice):
     """Real Tapo L530E control via the tapo library."""
+
+    ACTION_PARAMS = {
+        "turn_on": [],
+        "turn_off": [],
+        "set_brightness": ["brightness"],
+        "get_status": [],
+    }
 
     def __init__(self, device):
         self._device = device

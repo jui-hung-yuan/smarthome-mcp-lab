@@ -1,7 +1,7 @@
 """Base device interface for smart home devices."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 
 class BaseDevice(ABC):
@@ -10,6 +10,8 @@ class BaseDevice(ABC):
     All devices must implement this interface to work with the IoT Bridge.
     This allows the bridge to be device-agnostic and support multiple device types.
     """
+
+    ACTION_PARAMS: ClassVar[dict[str, list[str]]] = {}
 
     @property
     @abstractmethod

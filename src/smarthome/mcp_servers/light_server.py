@@ -123,18 +123,18 @@ async def get_status() -> str:
 
 
 @app.tool()
-async def set_brightness(level: int) -> str:
+async def set_brightness(brightness: int) -> str:
     """Set the brightness level of the TAPO smart light bulb.
 
     Args:
-        level: Brightness level from 0 to 100
+        brightness: Brightness level from 0 to 100
 
     Returns:
         A message confirming the brightness was set
     """
-    logger.info("Tool called: set_brightness(%d)", level)
+    logger.info("Tool called: set_brightness(%d)", brightness)
     b = await get_bulb()
-    result = await b.set_brightness(level)
+    result = await b.set_brightness(brightness)
     if not isinstance(b, MockTapoBulb):
         await state_logger.log_state_change(DEVICE_ID, "set_brightness", result)
 

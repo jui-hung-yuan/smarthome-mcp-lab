@@ -83,14 +83,14 @@ class TestLambdaHandlerCommands:
             "state": {"is_on": True, "brightness": 50, "color_temp": 4000},
         }
 
-        result = lambda_handler({"level": 50}, _make_context("set_brightness"))
+        result = lambda_handler({"brightness": 50}, _make_context("set_brightness"))
 
         assert result["status"] == "success"
         assert result["brightness"] == 50
 
-        # Verify level was passed in parameters
+        # Verify brightness was passed in parameters
         call_kwargs = mock_send.call_args[1]
-        assert call_kwargs["parameters"] == {"level": 50}
+        assert call_kwargs["parameters"] == {"brightness": 50}
 
     @patch("smarthome.lambda_handler._log_state_change")
     @patch("smarthome.lambda_handler.send_command")
