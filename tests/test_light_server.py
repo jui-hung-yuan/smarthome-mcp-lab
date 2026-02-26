@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch
 
 from smarthome.devices import MockTapoBulb
-from smarthome.mcp_servers import light_server
+from smarthome.aws_mcp.mcp_servers import light_server
 
 # The @app.tool() decorator wraps functions into FunctionTool objects.
 # Access the underlying async functions via the .fn attribute.
@@ -25,7 +25,7 @@ def _inject_bulb(mock_bulb):
 @pytest.fixture(autouse=True)
 def _disable_dynamo(monkeypatch):
     """Prevent DynamoDB calls during light server tests."""
-    from smarthome.logging import DynamoStateLogger
+    from smarthome.aws_mcp.logging import DynamoStateLogger
 
     disabled_logger = DynamoStateLogger()
     disabled_logger._disabled = True
@@ -71,6 +71,6 @@ async def test_set_brightness_error_formats_response():
 @pytest.mark.asyncio
 async def test_get_bulb_falls_back_to_mock():
     light_server.bulb = None
-    with patch("smarthome.mcp_servers.light_server.dotenv_values", return_value={}):
+    with patch("smarthome.aws_mcp.mcp_servers.light_server.dotenv_values", return_value={}):
         b = await light_server.get_bulb()
     assert isinstance(b, MockTapoBulb)

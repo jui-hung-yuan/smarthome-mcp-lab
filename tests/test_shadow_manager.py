@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from smarthome.bridge.shadow_manager import ShadowManager
+from smarthome.aws_mcp.bridge.shadow_manager import ShadowManager
 
 # Import mocks directly to avoid module path issues
 import sys

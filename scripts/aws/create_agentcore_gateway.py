@@ -6,11 +6,11 @@ Creates:
 3. Gateway Target (smarthome-light) with inline tool schemas pointing to Lambda
 
 Prerequisites:
-    uv run python scripts/create_cognito.py   (creates Cognito config)
-    uv run python scripts/create_lambda.py     (creates Lambda function)
+    uv run python scripts/aws/create_cognito.py   (creates Cognito config)
+    uv run python scripts/aws/create_lambda.py     (creates Lambda function)
 
 Usage:
-    uv run python scripts/create_agentcore_gateway.py
+    uv run python scripts/aws/create_agentcore_gateway.py
 """
 
 import json
@@ -126,7 +126,7 @@ def load_cognito_config() -> dict:
     if not COGNITO_CONFIG_FILE.exists():
         raise FileNotFoundError(
             f"Cognito config not found at {COGNITO_CONFIG_FILE}. "
-            f"Run 'uv run python scripts/create_cognito.py' first."
+            f"Run 'uv run python scripts/aws/create_cognito.py' first."
         )
     return json.loads(COGNITO_CONFIG_FILE.read_text())
 
@@ -453,7 +453,7 @@ def main():
         print(f"  Client ID:      {cognito_config['client_id']}")
     print()
     print("Make sure the local bridge is running:")
-    print("  uv run python scripts/run_bridge.py")
+    print("  uv run python scripts/aws/run_bridge.py")
     print("=" * 60)
 
 

@@ -10,7 +10,7 @@ Creates:
 Saves client_id, client_secret, and discovery_url to ~/.smarthome/cognito_config.json.
 
 Usage:
-    uv run python scripts/create_cognito.py
+    uv run python scripts/aws/create_cognito.py
 """
 
 import json
@@ -316,9 +316,9 @@ def main():
         print(f"Claude Web Client Secret: {claude_web_client['ClientSecret'][:8]}...")
     print()
     print("Next steps:")
-    print("  1. Build Lambda package: uv run python scripts/package_lambda.py")
-    print("  2. Create Lambda:        uv run python scripts/create_lambda.py")
-    print("  3. Create Gateway:       uv run python scripts/create_agentcore_gateway.py")
+    print("  1. Build Lambda package: uv run python scripts/aws/package_lambda.py")
+    print("  2. Create Lambda:        uv run python scripts/aws/create_lambda.py")
+    print("  3. Create Gateway:       uv run python scripts/aws/create_agentcore_gateway.py")
     print()
     print("To connect from Claude web app, use:")
     print(f"  Client ID:     {claude_web_client['ClientId']}")

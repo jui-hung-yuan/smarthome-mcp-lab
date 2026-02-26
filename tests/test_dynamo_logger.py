@@ -5,7 +5,7 @@ import pytest
 from moto import mock_aws
 from boto3.dynamodb.conditions import Key
 
-from smarthome.logging import DynamoStateLogger
+from smarthome.aws_mcp.logging import DynamoStateLogger
 
 TABLE_NAME = "smarthome-state-log"
 REGION = "eu-central-1"
@@ -121,7 +121,7 @@ async def test_graceful_degradation_no_credentials(monkeypatch):
     from unittest.mock import patch
 
     logger = DynamoStateLogger()
-    with patch("smarthome.logging.dynamo_logger.boto3.Session", side_effect=Exception("no credentials")):
+    with patch("smarthome.aws_mcp.logging.dynamo_logger.boto3.Session", side_effect=Exception("no credentials")):
         await logger.log_state_change(DEVICE_ID, "turn_on", _make_result())
     assert logger._disabled is True
 

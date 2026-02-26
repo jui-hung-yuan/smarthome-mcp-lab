@@ -1,7 +1,7 @@
 """Create the DynamoDB table for smart home state logging.
 
 Run once to set up the table:
-    uv run python scripts/create_dynamodb_table.py
+    uv run python scripts/aws/create_dynamodb_table.py
 """
 
 import os

@@ -16,8 +16,8 @@ import os
 
 import boto3
 
-from smarthome.cloud.iot_commands import send_command, get_device_state
-from smarthome.logging.dynamo_logger import DynamoStateLogger
+from smarthome.aws_mcp.cloud.iot_commands import send_command, get_device_state
+from smarthome.aws_mcp.logging.dynamo_logger import DynamoStateLogger
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

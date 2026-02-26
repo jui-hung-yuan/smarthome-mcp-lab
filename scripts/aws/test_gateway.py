@@ -12,7 +12,7 @@ Tests step by step:
 Reports round-trip latency for each request and prints a summary at the end.
 
 Usage:
-    uv run python scripts/test_gateway.py
+    uv run python scripts/aws/test_gateway.py
 """
 
 import base64

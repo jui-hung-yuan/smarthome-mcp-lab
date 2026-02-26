@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 from dotenv import dotenv_values
 
 from smarthome.devices import TapoBulb, MockTapoBulb
-from smarthome.logging import DynamoStateLogger
+from smarthome.aws_mcp.logging import DynamoStateLogger
 
 # Configure logging
 logging.basicConfig(

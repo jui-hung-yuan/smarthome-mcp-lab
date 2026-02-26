@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from smarthome.cloud.iot_commands import send_command, get_device_state
+from smarthome.aws_mcp.cloud.iot_commands import send_command, get_device_state
 
 DEVICE_ID = "tapo-bulb-default"
 THING_NAME = "smarthome-bridge-home"
@@ -69,7 +69,7 @@ class TestGetDeviceState:
 
 
 class TestSendCommand:
-    @patch("smarthome.cloud.iot_commands.time.sleep")
+    @patch("smarthome.aws_mcp.cloud.iot_commands.time.sleep")
     def test_publishes_and_reads_state(self, mock_sleep, mock_iot_client):
         result = send_command(
             device_id=DEVICE_ID,
@@ -96,7 +96,7 @@ class TestSendCommand:
         assert "timestamp" in payload
         assert payload["parameters"] == {}
 
-    @patch("smarthome.cloud.iot_commands.time.sleep")
+    @patch("smarthome.aws_mcp.cloud.iot_commands.time.sleep")
     def test_passes_parameters(self, mock_sleep, mock_iot_client):
         result = send_command(
             device_id=DEVICE_ID,
@@ -111,7 +111,7 @@ class TestSendCommand:
         payload = json.loads(call_kwargs["payload"].decode("utf-8"))
         assert payload["parameters"] == {"level": 50}
 
-    @patch("smarthome.cloud.iot_commands.time.sleep")
+    @patch("smarthome.aws_mcp.cloud.iot_commands.time.sleep")
     def test_returns_failure_on_publish_error(self, mock_sleep, mock_iot_client):
         mock_iot_client.publish.side_effect = Exception("Connection refused")
 
@@ -127,7 +127,7 @@ class TestSendCommand:
         assert result["success"] is False
         assert "Failed to publish" in result["message"]
 
-    @patch("smarthome.cloud.iot_commands.time.sleep")
+    @patch("smarthome.aws_mcp.cloud.iot_commands.time.sleep")
     def test_returns_failure_when_shadow_unreadable(self, mock_sleep, mock_iot_client):
         mock_iot_client.get_thing_shadow.side_effect = Exception("Shadow error")
 
@@ -143,7 +143,7 @@ class TestSendCommand:
         assert result["success"] is False
         assert "failed to read back state" in result["message"].lower()
 
-    @patch("smarthome.cloud.iot_commands.time.sleep")
+    @patch("smarthome.aws_mcp.cloud.iot_commands.time.sleep")
     def test_waits_for_command_processing(self, mock_sleep, mock_iot_client):
         send_command(
             device_id=DEVICE_ID,

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
-from smarthome.bridge.config import IoTConfig
-from smarthome.bridge.device_registry import DeviceRegistry
-from smarthome.bridge.iot_bridge import IoTBridge
+from smarthome.aws_mcp.bridge.config import IoTConfig
+from smarthome.devices.device_registry import DeviceRegistry
+from smarthome.aws_mcp.bridge.iot_bridge import IoTBridge
 from smarthome.devices.tapo_bulb import MockTapoBulb
 
 # Import mocks directly to avoid module path issues

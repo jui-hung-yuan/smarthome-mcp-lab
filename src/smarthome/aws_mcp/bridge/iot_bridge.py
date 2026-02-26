@@ -10,9 +10,9 @@ from typing import Any, Optional
 from awscrt import mqtt
 from awsiot import mqtt_connection_builder
 
-from smarthome.bridge.config import IoTConfig
-from smarthome.bridge.device_registry import DeviceRegistry
-from smarthome.bridge.shadow_manager import ShadowManager
+from smarthome.aws_mcp.bridge.config import IoTConfig
+from smarthome.devices.device_registry import DeviceRegistry
+from smarthome.aws_mcp.bridge.shadow_manager import ShadowManager
 
 logger = logging.getLogger(__name__)
 

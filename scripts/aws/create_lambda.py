@@ -5,10 +5,10 @@ Creates:
 2. Lambda function (smarthome-gateway-handler) from dist/smarthome-lambda.zip
 
 Prerequisites:
-    uv run python scripts/package_lambda.py   (builds the zip)
+    uv run python scripts/aws/package_lambda.py   (builds the zip)
 
 Usage:
-    uv run python scripts/create_lambda.py
+    uv run python scripts/aws/create_lambda.py
 """
 
 import json
@@ -25,7 +25,7 @@ ROLE_NAME = "smarthome-gateway-lambda-role"
 IOT_THING_NAME = os.environ.get("IOT_THING_NAME", "smarthome-bridge-home")
 DEVICE_ID = os.environ.get("DEVICE_ID", "tapo-bulb-default")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ZIP_PATH = PROJECT_ROOT / "dist" / "smarthome-lambda.zip"
 
 ASSUME_ROLE_POLICY = {
@@ -123,7 +123,7 @@ def create_lambda_function(session, role_arn: str) -> str:
     if not ZIP_PATH.exists():
         raise FileNotFoundError(
             f"Lambda package not found at {ZIP_PATH}. "
-            f"Run 'uv run python scripts/package_lambda.py' first."
+            f"Run 'uv run python scripts/aws/package_lambda.py' first."
         )
 
     lambda_client = session.client("lambda")
@@ -142,7 +142,7 @@ def create_lambda_function(session, role_arn: str) -> str:
             FunctionName=FUNCTION_NAME,
             Runtime="python3.12",
             Role=role_arn,
-            Handler="smarthome.lambda_handler.lambda_handler",
+            Handler="smarthome.aws_mcp.lambda_handler.lambda_handler",
             Code={"ZipFile": zip_bytes},
             Description="SmartHome AgentCore Gateway handler - routes tools to IoT Core",
             Timeout=30,
@@ -168,7 +168,7 @@ def create_lambda_function(session, role_arn: str) -> str:
             lambda_client.update_function_configuration(
                 FunctionName=FUNCTION_NAME,
                 Role=role_arn,
-                Handler="smarthome.lambda_handler.lambda_handler",
+                Handler="smarthome.aws_mcp.lambda_handler.lambda_handler",
                 Timeout=30,
                 MemorySize=256,
                 Environment=environment,
@@ -213,7 +213,7 @@ def main():
     print(f"Device:   {DEVICE_ID}")
     print()
     print("Next step:")
-    print("  uv run python scripts/create_agentcore_gateway.py")
+    print("  uv run python scripts/aws/create_agentcore_gateway.py")
     print("=" * 60)
 
 

@@ -1,7 +1,7 @@
 """Tests for DeviceRegistry."""
 
 import pytest
-from smarthome.bridge.device_registry import DeviceRegistry
+from smarthome.devices.device_registry import DeviceRegistry
 from smarthome.devices.tapo_bulb import MockTapoBulb
 
 

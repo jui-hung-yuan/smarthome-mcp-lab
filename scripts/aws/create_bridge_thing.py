@@ -1,7 +1,7 @@
 """Create AWS IoT Thing for the Smart Home Bridge.
 
 Run once to provision IoT resources:
-    uv run python scripts/create_bridge_thing.py
+    uv run python scripts/aws/create_bridge_thing.py
 
 This script:
 1. Creates an IoT Thing named 'smarthome-bridge-{bridge_id}'
@@ -323,7 +323,7 @@ def main():
     print(f"Default device: {args.default_device}")
     print()
     print("To start the bridge:")
-    print("  uv run python scripts/run_bridge.py")
+    print("  uv run python scripts/aws/run_bridge.py")
     print()
     print("To test with a command (requires aws-cli):")
     print(f'  aws iot-data publish \\')

@@ -1,14 +1,14 @@
 """Build Lambda deployment package for AgentCore Gateway handler.
 
 Creates dist/smarthome-lambda.zip containing only the modules needed:
-  - smarthome/cloud/iot_commands.py
-  - smarthome/lambda_handler.py
-  - smarthome/logging/dynamo_logger.py
+  - smarthome/aws_mcp/cloud/iot_commands.py
+  - smarthome/aws_mcp/lambda_handler.py
+  - smarthome/aws_mcp/logging/dynamo_logger.py
 
 boto3 is already available in the Lambda runtime, so no dependencies are bundled.
 
 Usage:
-    uv run python scripts/package_lambda.py
+    uv run python scripts/aws/package_lambda.py
 """
 
 import os
@@ -16,19 +16,22 @@ import zipfile
 from pathlib import Path
 
 # Project root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 DIST_DIR = PROJECT_ROOT / "dist"
 ZIP_NAME = "smarthome-lambda.zip"
 
-# Files to include (relative to src/)
+# Files to include (relative to src/, stored at same path in zip)
+# Must preserve smarthome/ package prefix so Lambda imports work as
+# smarthome.aws_mcp.lambda_handler etc.
 INCLUDE_FILES = [
     "smarthome/__init__.py",
-    "smarthome/cloud/__init__.py",
-    "smarthome/cloud/iot_commands.py",
-    "smarthome/lambda_handler.py",
-    "smarthome/logging/__init__.py",
-    "smarthome/logging/dynamo_logger.py",
+    "smarthome/aws_mcp/__init__.py",
+    "smarthome/aws_mcp/cloud/__init__.py",
+    "smarthome/aws_mcp/cloud/iot_commands.py",
+    "smarthome/aws_mcp/lambda_handler.py",
+    "smarthome/aws_mcp/logging/__init__.py",
+    "smarthome/aws_mcp/logging/dynamo_logger.py",
 ]
 
 
@@ -79,4 +82,4 @@ if __name__ == "__main__":
     zip_path = build_package()
     verify_package(zip_path)
     print("\nDone. Upload to Lambda with:")
-    print(f"  uv run python scripts/create_lambda.py")
+    print(f"  uv run python scripts/aws/create_lambda.py")

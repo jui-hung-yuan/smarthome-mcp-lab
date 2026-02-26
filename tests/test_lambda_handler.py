@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from smarthome.lambda_handler import lambda_handler, _extract_tool_name
+from smarthome.aws_mcp.lambda_handler import lambda_handler, _extract_tool_name
 
 
 def _make_context(tool_name: str) -> MagicMock:
@@ -44,8 +44,8 @@ class TestExtractToolName:
 
 
 class TestLambdaHandlerCommands:
-    @patch("smarthome.lambda_handler._log_state_change")
-    @patch("smarthome.lambda_handler.send_command")
+    @patch("smarthome.aws_mcp.lambda_handler._log_state_change")
+    @patch("smarthome.aws_mcp.lambda_handler.send_command")
     def test_turn_on(self, mock_send, mock_log):
         mock_send.return_value = {
             "success": True,
@@ -60,8 +60,8 @@ class TestLambdaHandlerCommands:
         mock_send.assert_called_once()
         mock_log.assert_called_once()
 
-    @patch("smarthome.lambda_handler._log_state_change")
-    @patch("smarthome.lambda_handler.send_command")
+    @patch("smarthome.aws_mcp.lambda_handler._log_state_change")
+    @patch("smarthome.aws_mcp.lambda_handler.send_command")
     def test_turn_off(self, mock_send, mock_log):
         mock_send.return_value = {
             "success": True,
@@ -74,8 +74,8 @@ class TestLambdaHandlerCommands:
         assert result["status"] == "success"
         assert result["is_on"] is False
 
-    @patch("smarthome.lambda_handler._log_state_change")
-    @patch("smarthome.lambda_handler.send_command")
+    @patch("smarthome.aws_mcp.lambda_handler._log_state_change")
+    @patch("smarthome.aws_mcp.lambda_handler.send_command")
     def test_set_brightness(self, mock_send, mock_log):
         mock_send.return_value = {
             "success": True,
@@ -92,8 +92,8 @@ class TestLambdaHandlerCommands:
         call_kwargs = mock_send.call_args[1]
         assert call_kwargs["parameters"] == {"brightness": 50}
 
-    @patch("smarthome.lambda_handler._log_state_change")
-    @patch("smarthome.lambda_handler.send_command")
+    @patch("smarthome.aws_mcp.lambda_handler._log_state_change")
+    @patch("smarthome.aws_mcp.lambda_handler.send_command")
     def test_command_failure(self, mock_send, mock_log):
         mock_send.return_value = {
             "success": False,
@@ -108,7 +108,7 @@ class TestLambdaHandlerCommands:
 
 
 class TestLambdaHandlerStatus:
-    @patch("smarthome.lambda_handler.get_device_state")
+    @patch("smarthome.aws_mcp.lambda_handler.get_device_state")
     def test_get_status(self, mock_get_state):
         mock_get_state.return_value = {
             "is_on": True,
@@ -124,7 +124,7 @@ class TestLambdaHandlerStatus:
         assert result["brightness"] == 80
         assert result["bridge_connected"] is True
 
-    @patch("smarthome.lambda_handler.get_device_state")
+    @patch("smarthome.aws_mcp.lambda_handler.get_device_state")
     def test_get_status_failure(self, mock_get_state):
         mock_get_state.return_value = None
 

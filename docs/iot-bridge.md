@@ -54,7 +54,7 @@ The Local Bridge runs on your home network and:
 Run the provisioning script to create the IoT Thing, certificates, and policy:
 
 ```bash
-uv run python scripts/create_iot_thing.py
+uv run python scripts/aws/create_iot_thing.py
 ```
 
 This creates:
@@ -67,13 +67,13 @@ This creates:
 
 ```bash
 # With real bulb (uses credentials from ~/.smarthome/.env)
-uv run python scripts/run_bridge.py
+uv run python scripts/aws/run_bridge.py
 
 # With mock bulb (for testing without hardware)
-uv run python scripts/run_bridge.py --mock
+uv run python scripts/aws/run_bridge.py --mock
 
 # With debug logging
-uv run python scripts/run_bridge.py --debug
+uv run python scripts/aws/run_bridge.py --debug
 ```
 
 ### 3. Test via AWS CLI
@@ -195,13 +195,13 @@ Located at `~/.smarthome/iot/config.json`:
 ## Module Structure
 
 ```
-src/smarthome/bridge/
+src/smarthome/aws-mcp/bridge/
 ├── __init__.py           # Exports IoTBridge, ShadowManager, IoTConfig
 ├── config.py             # Configuration loader
 ├── shadow_manager.py     # Device Shadow operations
 └── iot_bridge.py         # Main bridge implementation
 
-scripts/
+scripts/aws/
 ├── create_iot_thing.py   # IoT provisioning script
 └── run_bridge.py         # Bridge entry point
 ```

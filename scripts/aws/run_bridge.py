@@ -1,8 +1,8 @@
 """Entry point to start the IoT Bridge.
 
 Usage:
-    uv run python scripts/run_bridge.py           # Use real bulb if credentials available
-    uv run python scripts/run_bridge.py --mock    # Force mock bulb mode
+    uv run python scripts/aws/run_bridge.py           # Use real bulb if credentials available
+    uv run python scripts/aws/run_bridge.py --mock    # Force mock bulb mode
 
 The bridge connects to AWS IoT Core and waits for commands on:
     smarthome/{device_id}/commands/{action}
@@ -21,9 +21,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from smarthome.bridge.config import load_config
-from smarthome.bridge.device_registry import DeviceRegistry
-from smarthome.bridge.iot_bridge import IoTBridge
+from smarthome.aws_mcp.bridge.config import load_config
+from smarthome.devices.device_registry import DeviceRegistry
+from smarthome.aws_mcp.bridge.iot_bridge import IoTBridge
 from smarthome.devices.tapo_bulb import MockTapoBulb, TapoBulb
 
 # Configure logging
