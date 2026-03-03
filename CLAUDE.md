@@ -27,10 +27,11 @@ src/smarthome/
 │   ├── mcp_servers/      # FastMCP server (light_server.py)
 │   └── lambda_handler.py # AgentCore Gateway Lambda entry point
 └── agent/                # Local-first agent loop (CLI)
-    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock]`
+    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock|--slack]`
     ├── config.py         # AgentConfig: paths, model, mock flag
     ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
     ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
+    ├── slack_adapter.py  # Slack channel adapter (Socket Mode, per-thread sessions)
     ├── memory/
     │   ├── manager.py    # MemoryManager: search, write, sync, session context
     │   ├── schema.py     # SQLite schema: files, chunks, FTS5, vec, device_events
@@ -63,10 +64,14 @@ AWS_PROFILE=self uv run python scripts/aws/create_lambda.py
 # Test remote path end-to-end
 AWS_PROFILE=self uv run python scripts/aws/test_gateway.py
 
-# Local Agent
+# Local Agent — CLI
 uv run python -m smarthome.agent --mock    # mock bulb, no hardware needed
 uv run python -m smarthome.agent           # real bulb (requires TAPO_* in ~/.smarthome/.env)
 uv run python -m smarthome.agent --debug   # verbose logging
+
+# Local Agent — Slack (requires SLACK_* in ~/.smarthome/.env)
+uv run python -m smarthome.agent --slack --mock
+uv run python -m smarthome.agent --slack
 ```
 
 Full setup instructions for both paths: **[docs/mcp-setup.md](docs/mcp-setup.md)**
@@ -90,13 +95,17 @@ Provisioning scripts in `scripts/aws/` (run in order for first-time setup):
 
 ## Local Agent Path (implemented)
 
-A local agent loop with Markdown-based persistent memory and pluggable skills. No cloud dependency — runs entirely on the local machine.
+A local agent loop with Markdown-based persistent memory and pluggable skills. No cloud dependency — runs entirely on the local machine. Supports two front-ends that share the same `AgentLoop`, memory, and skills:
 
 ```
-User  →  AgentLoop (loop.py)
-          ├── memory/   ~/.smarthome/memory/ (MEMORY.md, USER.md, SOUL.md, daily logs)
-          └── skills/   light-control → TapoBulb / MockTapoBulb
+CLI input   →  AgentLoop (loop.py)
+Slack input ↗     ├── memory/   ~/.smarthome/memory/
+                  └── skills/   light-control → TapoBulb / MockTapoBulb
 ```
+
+**Front-ends:**
+- **CLI** (`--` no flag): interactive REPL, one session per process
+- **Slack** (`--slack`): Socket Mode bot; one session per `(channel, thread)`, idle sessions auto-evicted after 30 min with memory flush. In channels, responds only to `@mention`; in DMs, responds to all messages.
 
 **3 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
@@ -106,6 +115,8 @@ User  →  AgentLoop (loop.py)
 **Configuration** (`~/.smarthome/.env`):
 - `ANTHROPIC_API_KEY` — required
 - `TAPO_USERNAME`, `TAPO_PASSWORD`, `TAPO_IP_ADDRESS` — required for real bulb; omit for `--mock`
+- `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` — required for `--slack`
+- `SLACK_ALLOWED_USERS` — optional comma-separated Slack user IDs allowlist
 
 **Memory storage** (`~/.smarthome/memory/`):
 - Markdown files: `MEMORY.md` (facts/routines), `USER.md` (preferences), `SOUL.md` (tone), `YYYY-MM-DD.md` (daily logs)
@@ -125,3 +136,4 @@ User  →  AgentLoop (loop.py)
 - **SkillLoader** (`skill_loader.py`): scans `skills/*/SKILL.md` at startup, dynamically imports scripts, builds system prompt section, exposes single `execute_skill` tool to Claude.
 - **MemoryManager** (`memory/manager.py`): incremental file sync (hash+mtime), hybrid BM25+vector search with RRF merge, session context loader.
 - **OllamaEmbedder** (`memory/embedder.py`): availability checked once on first call; if ollama unreachable, vector search disabled silently, BM25 still works.
+- **SlackAdapter** (`slack_adapter.py`): thin transport layer over `AgentLoop`; `AgentLoop.turn()` is the shared entry point for both CLI and Slack. Sessions keyed by `channel:thread_ts`.

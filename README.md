@@ -12,6 +12,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 
 ## Features
 
+### MCP Paths
 - **Turn lights on/off**, **set brightness**, **get bulb status** (on/off, brightness, color temp)
 - **Real bulb control** via `tapo` library over local network
 - **Mock fallback** — automatically uses a mock when credentials are missing or the bulb is unreachable
@@ -21,7 +22,11 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **AgentCore Gateway** — remote MCP server with Cognito OAuth for Claude web app
 - **Multi-device support** — single bridge manages multiple devices via `DeviceRegistry`
 - **Device-agnostic architecture** — `BaseDevice` interface makes adding new device types straightforward
-- **Local agent loop** — interactive CLI, persistent memory, no cloud dependency
+
+### Local Agent
+- **Interactive CLI and Slack bot** — two front-ends sharing the same agent loop, memory, and skills
+- **Slack Socket Mode** — per-thread sessions, `@mention` in channels, direct messages; idle sessions auto-evict after 30 min with memory flush
+- **Persistent memory, no cloud dependency** — Markdown files + SQLite index, runs entirely on-device
 - **Hybrid memory search** — BM25 (FTS5) + vector embeddings (ollama) merged via Reciprocal Rank Fusion
 - **Pluggable skills** — drop a folder into `skills/`, write `SKILL.md` — zero changes to the loop
 - **Color temperature control** — `set_color_temp` (2500–6500 K) via the agent skill
@@ -40,11 +45,12 @@ src/smarthome/
 │   ├── logging/          # DynamoDB state logger
 │   ├── mcp_servers/      # FastMCP server (light_server.py)
 │   └── lambda_handler.py # AgentCore Gateway Lambda entry point
-└── agent/                # Local-first agent loop (CLI)
-    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock]`
+└── agent/                # Local-first agent loop (CLI + Slack)
+    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock|--slack]`
     ├── config.py         # AgentConfig: paths, model, mock flag
     ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
     ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
+    ├── slack_adapter.py  # Slack channel adapter (Socket Mode, per-thread sessions)
     ├── memory/
     │   ├── manager.py    # MemoryManager: search, write, sync, session context
     │   ├── schema.py     # SQLite schema: files, chunks, FTS5, vec, device_events
@@ -90,13 +96,17 @@ See [docs/claude-web-oauth.md](docs/claude-web-oauth.md) for the OAuth flow deta
 
 ### Local Agent
 
-An OpenClaw-inspired agent loop that runs entirely locally — no cloud dependency:
+An OpenClaw-inspired agent loop that runs entirely locally — no cloud dependency. Two front-ends share the same `AgentLoop`, memory, and skills:
 
 ```
-User → AgentLoop
-         ├── memory/  ~/.smarthome/memory/ — MEMORY.md, USER.md, SOUL.md, daily logs
-         └── skills/  light-control — wraps TapoBulb / MockTapoBulb
+CLI input   →  AgentLoop
+Slack input ↗     ├── memory/  ~/.smarthome/memory/ — MEMORY.md, USER.md, SOUL.md, daily logs
+                  └── skills/  light-control — wraps TapoBulb / MockTapoBulb
 ```
+
+**Front-ends:**
+- **CLI** — interactive REPL, one session per process
+- **Slack** (`--slack`) — Socket Mode bot; one session per `(channel, thread)`, responds to `@mention` in channels and all messages in DMs; idle sessions auto-evict after 30 min with memory flush
 
 **3 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
@@ -168,6 +178,12 @@ See **[docs/mcp-setup.md](docs/mcp-setup.md)** for full step-by-step instruction
 4. Run with real bulb — add `TAPO_USERNAME`, `TAPO_PASSWORD`, `TAPO_IP_ADDRESS` to `~/.smarthome/.env`, then:
    ```bash
    uv run python -m smarthome.agent
+   ```
+
+5. Run as a Slack bot — add `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` to `~/.smarthome/.env`, then:
+   ```bash
+   uv run python -m smarthome.agent --slack --mock   # mock bulb
+   uv run python -m smarthome.agent --slack          # real bulb
    ```
 
 ### Quick start — Remote MCP (AWS)
