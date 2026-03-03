@@ -69,42 +69,4 @@ async def execute(action: str, params: dict) -> dict:
         device = await _get_device()
     except RuntimeError as e:
         return {"success": False, "message": str(e)}
-
-    # set_color_temp is handled here since MockTapoBulb doesn't expose it separately
-    if action == "set_color_temp":
-        color_temp = params.get("color_temp")
-        if color_temp is None:
-            return {"success": False, "message": "color_temp parameter required"}
-        color_temp = int(color_temp)
-        if not (2500 <= color_temp <= 6500):
-            return {
-                "success": False,
-                "message": f"color_temp must be 2500-6500 K, got {color_temp}",
-            }
-        # MockTapoBulb: update state directly; TapoBulb: use device API if available
-        if hasattr(device, "state"):
-            device.state["color_temp"] = color_temp
-            device._save_state()  # noqa: SLF001
-            return {
-                "success": True,
-                "message": f"Color temperature set to {color_temp} K",
-                "state": await device.get_status(),
-            }
-        elif hasattr(device, "_device"):
-            # Real TapoBulb — try set_color_temperature if available
-            try:
-                await device._device.set_color_temperature(color_temp)  # noqa: SLF001
-                return {
-                    "success": True,
-                    "message": f"Color temperature set to {color_temp} K",
-                    "state": await device.get_status(),
-                }
-            except AttributeError:
-                return {
-                    "success": False,
-                    "message": "set_color_temperature not available on this device",
-                }
-        return {"success": False, "message": "Cannot set color temperature on this device"}
-
-    # Delegate all other actions to the BaseDevice.execute() interface
     return await device.execute(action, params)

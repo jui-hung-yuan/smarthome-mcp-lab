@@ -114,8 +114,8 @@ class TestIoTBridgeCommandHandling:
 
         await bridge._handle_command(topic, payload)
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is True
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is True
 
         responses = mock_connection.get_published_to("smarthome/test-device/responses/")
         assert len(responses) == 1
@@ -129,15 +129,15 @@ class TestIoTBridgeCommandHandling:
         """Test turn_off command via _handle_command."""
         bridge._connection = mock_connection
         bridge._shadow_manager = mock_shadow_manager
-        await mock_bulb.turn_on()
+        await mock_bulb.execute("turn_on", {})
 
         topic = "smarthome/test-device/commands/turn_off"
         payload = json.dumps({"request_id": "test-off", "parameters": {}}).encode()
 
         await bridge._handle_command(topic, payload)
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is False
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is False
 
     @pytest.mark.asyncio
     async def test_handle_command_set_brightness(
@@ -154,8 +154,8 @@ class TestIoTBridgeCommandHandling:
 
         await bridge._handle_command(topic, payload)
 
-        status = await mock_bulb.get_status()
-        assert status["brightness"] == 75
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["brightness"] == 75
 
     @pytest.mark.asyncio
     async def test_handle_command_set_brightness_missing_param(
@@ -281,35 +281,35 @@ class TestIoTBridgeShadowDelta:
         """Test applying desired state to turn on bulb."""
         await bridge._apply_desired_state({"is_on": True})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is True
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is True
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_turn_off(self, bridge, mock_bulb):
         """Test applying desired state to turn off bulb."""
-        await mock_bulb.turn_on()
+        await mock_bulb.execute("turn_on", {})
 
         await bridge._apply_desired_state({"is_on": False})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is False
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is False
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_brightness(self, bridge, mock_bulb):
         """Test applying desired brightness from shadow delta."""
         await bridge._apply_desired_state({"brightness": 50})
 
-        status = await mock_bulb.get_status()
-        assert status["brightness"] == 50
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["brightness"] == 50
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_multiple_fields(self, bridge, mock_bulb):
         """Test applying multiple desired state fields."""
         await bridge._apply_desired_state({"is_on": True, "brightness": 75})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is True
-        assert status["brightness"] == 75
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is True
+        assert result["state"]["brightness"] == 75
 
 
 class TestIoTBridgeConnection:

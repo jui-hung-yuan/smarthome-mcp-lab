@@ -24,6 +24,7 @@ class MockTapoBulb(BaseDevice):
         "turn_on": [],
         "turn_off": [],
         "set_brightness": ["brightness"],
+        "set_color_temp": ["color_temp"],
         "get_status": [],
     }
 
@@ -59,47 +60,12 @@ class MockTapoBulb(BaseDevice):
         except IOError as e:
             logger.error(f"Failed to save state: {e}")
 
-    async def turn_on(self) -> Dict[str, Any]:
-        logger.info("Turning bulb ON (mock)")
-        self.state["is_on"] = True
-        self._save_state()
-        return {
-            "success": True,
-            "message": "Bulb turned on",
-            "state": await self.get_status()
-        }
-
-    async def turn_off(self) -> Dict[str, Any]:
-        logger.info("Turning bulb OFF (mock)")
-        self.state["is_on"] = False
-        self._save_state()
-        return {
-            "success": True,
-            "message": "Bulb turned off",
-            "state": await self.get_status()
-        }
-
-    async def get_status(self) -> Dict[str, Any]:
+    def _get_status(self) -> Dict[str, Any]:
         return {
             "is_on": self.state["is_on"],
             "brightness": self.state["brightness"],
             "color_temp": self.state["color_temp"],
             "last_updated": self.state["last_updated"]
-        }
-
-    async def set_brightness(self, brightness: int) -> Dict[str, Any]:
-        if not 0 <= brightness <= 100:
-            return {
-                "success": False,
-                "message": f"Brightness must be 0-100, got {brightness}"
-            }
-        logger.info(f"Setting brightness to {brightness} (mock)")
-        self.state["brightness"] = brightness
-        self._save_state()
-        return {
-            "success": True,
-            "message": f"Brightness set to {brightness}",
-            "state": await self.get_status()
         }
 
     # BaseDevice interface implementation
@@ -110,7 +76,7 @@ class MockTapoBulb(BaseDevice):
 
     @property
     def supported_actions(self) -> list[str]:
-        return ["turn_on", "turn_off", "set_brightness", "get_status"]
+        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "get_status"]
 
     async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if action not in self.supported_actions:
@@ -121,10 +87,18 @@ class MockTapoBulb(BaseDevice):
             }
 
         if action == "turn_on":
-            return await self.turn_on()
-        elif action == "turn_off":
-            return await self.turn_off()
-        elif action == "set_brightness":
+            logger.info("Turning bulb ON (mock)")
+            self.state["is_on"] = True
+            self._save_state()
+            return {"success": True, "message": "Bulb turned on", "state": self._get_status()}
+
+        if action == "turn_off":
+            logger.info("Turning bulb OFF (mock)")
+            self.state["is_on"] = False
+            self._save_state()
+            return {"success": True, "message": "Bulb turned off", "state": self._get_status()}
+
+        if action == "set_brightness":
             brightness = parameters.get("brightness")
             if brightness is None:
                 return {
@@ -132,22 +106,48 @@ class MockTapoBulb(BaseDevice):
                     "message": "brightness parameter required",
                     "state": await self.get_shadow_state(),
                 }
-            return await self.set_brightness(int(brightness))
-        elif action == "get_status":
+            brightness = int(brightness)
+            if not 0 <= brightness <= 100:
+                return {
+                    "success": False,
+                    "message": f"Brightness must be 0-100, got {brightness}",
+                }
+            logger.info(f"Setting brightness to {brightness} (mock)")
+            self.state["brightness"] = brightness
+            self._save_state()
+            return {"success": True, "message": f"Brightness set to {brightness}", "state": self._get_status()}
+
+        if action == "set_color_temp":
+            color_temp = parameters.get("color_temp")
+            if color_temp is None:
+                return {
+                    "success": False,
+                    "message": "color_temp parameter required",
+                    "state": await self.get_shadow_state(),
+                }
+            color_temp = int(color_temp)
+            if not (2500 <= color_temp <= 6500):
+                return {
+                    "success": False,
+                    "message": f"color_temp must be 2500-6500 K, got {color_temp}",
+                }
+            logger.info(f"Setting color temperature to {color_temp} K (mock)")
+            self.state["color_temp"] = color_temp
+            self._save_state()
             return {
                 "success": True,
-                "message": "Status retrieved",
-                "state": await self.get_status(),
+                "message": f"Color temperature set to {color_temp} K",
+                "state": self._get_status(),
             }
+
+        if action == "get_status":
+            return {"success": True, "message": "Status retrieved", "state": self._get_status()}
 
     async def apply_desired_state(self, desired: Dict[str, Any]) -> None:
         if "is_on" in desired:
-            if desired["is_on"]:
-                await self.turn_on()
-            else:
-                await self.turn_off()
+            await self.execute("turn_on" if desired["is_on"] else "turn_off", {})
         if "brightness" in desired:
-            await self.set_brightness(int(desired["brightness"]))
+            await self.execute("set_brightness", {"brightness": int(desired["brightness"])})
 
     async def get_shadow_state(self) -> Dict[str, Any]:
         return {
@@ -164,6 +164,7 @@ class TapoBulb(BaseDevice):
         "turn_on": [],
         "turn_off": [],
         "set_brightness": ["brightness"],
+        "set_color_temp": ["color_temp"],
         "get_status": [],
     }
 
@@ -176,45 +177,13 @@ class TapoBulb(BaseDevice):
         device = await client.l530(ip_address)
         return cls(device)
 
-    async def turn_on(self) -> Dict[str, Any]:
-        logger.info("Turning bulb ON (real)")
-        await self._device.on()
-        return {
-            "success": True,
-            "message": "Bulb turned on",
-            "state": await self.get_status()
-        }
-
-    async def turn_off(self) -> Dict[str, Any]:
-        logger.info("Turning bulb OFF (real)")
-        await self._device.off()
-        return {
-            "success": True,
-            "message": "Bulb turned off",
-            "state": await self.get_status()
-        }
-
-    async def get_status(self) -> Dict[str, Any]:
+    async def _get_status(self) -> Dict[str, Any]:
         info = await self._device.get_device_info()
         return {
             "is_on": info.device_on,
             "brightness": info.brightness,
             "color_temp": info.color_temp,
             "last_updated": datetime.now().isoformat()
-        }
-
-    async def set_brightness(self, brightness: int) -> Dict[str, Any]:
-        if not 0 <= brightness <= 100:
-            return {
-                "success": False,
-                "message": f"Brightness must be 0-100, got {brightness}"
-            }
-        logger.info(f"Setting brightness to {brightness} (real)")
-        await self._device.set_brightness(brightness)
-        return {
-            "success": True,
-            "message": f"Brightness set to {brightness}",
-            "state": await self.get_status()
         }
 
     # BaseDevice interface implementation
@@ -225,7 +194,7 @@ class TapoBulb(BaseDevice):
 
     @property
     def supported_actions(self) -> list[str]:
-        return ["turn_on", "turn_off", "set_brightness", "get_status"]
+        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "get_status"]
 
     async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if action not in self.supported_actions:
@@ -236,10 +205,16 @@ class TapoBulb(BaseDevice):
             }
 
         if action == "turn_on":
-            return await self.turn_on()
-        elif action == "turn_off":
-            return await self.turn_off()
-        elif action == "set_brightness":
+            logger.info("Turning bulb ON (real)")
+            await self._device.on()
+            return {"success": True, "message": "Bulb turned on", "state": await self._get_status()}
+
+        if action == "turn_off":
+            logger.info("Turning bulb OFF (real)")
+            await self._device.off()
+            return {"success": True, "message": "Bulb turned off", "state": await self._get_status()}
+
+        if action == "set_brightness":
             brightness = parameters.get("brightness")
             if brightness is None:
                 return {
@@ -247,25 +222,55 @@ class TapoBulb(BaseDevice):
                     "message": "brightness parameter required",
                     "state": await self.get_shadow_state(),
                 }
-            return await self.set_brightness(int(brightness))
-        elif action == "get_status":
+            brightness = int(brightness)
+            if not 0 <= brightness <= 100:
+                return {
+                    "success": False,
+                    "message": f"Brightness must be 0-100, got {brightness}",
+                }
+            logger.info(f"Setting brightness to {brightness} (real)")
+            await self._device.set_brightness(brightness)
+            return {"success": True, "message": f"Brightness set to {brightness}", "state": await self._get_status()}
+
+        if action == "set_color_temp":
+            color_temp = parameters.get("color_temp")
+            if color_temp is None:
+                return {
+                    "success": False,
+                    "message": "color_temp parameter required",
+                    "state": await self.get_shadow_state(),
+                }
+            color_temp = int(color_temp)
+            if not (2500 <= color_temp <= 6500):
+                return {
+                    "success": False,
+                    "message": f"color_temp must be 2500-6500 K, got {color_temp}",
+                }
+            logger.info(f"Setting color temperature to {color_temp} K (real)")
+            try:
+                await self._device.set_color_temperature(color_temp)
+            except AttributeError:
+                return {
+                    "success": False,
+                    "message": "set_color_temperature not available on this device",
+                }
             return {
                 "success": True,
-                "message": "Status retrieved",
-                "state": await self.get_status(),
+                "message": f"Color temperature set to {color_temp} K",
+                "state": await self._get_status(),
             }
+
+        if action == "get_status":
+            return {"success": True, "message": "Status retrieved", "state": await self._get_status()}
 
     async def apply_desired_state(self, desired: Dict[str, Any]) -> None:
         if "is_on" in desired:
-            if desired["is_on"]:
-                await self.turn_on()
-            else:
-                await self.turn_off()
+            await self.execute("turn_on" if desired["is_on"] else "turn_off", {})
         if "brightness" in desired:
-            await self.set_brightness(int(desired["brightness"]))
+            await self.execute("set_brightness", {"brightness": int(desired["brightness"])})
 
     async def get_shadow_state(self) -> Dict[str, Any]:
-        status = await self.get_status()
+        status = await self._get_status()
         return {
             "is_on": status["is_on"],
             "brightness": status["brightness"],

@@ -25,7 +25,7 @@ def tapo_bulb(mock_device):
 
 @pytest.mark.asyncio
 async def test_turn_on_delegates(tapo_bulb, mock_device):
-    result = await tapo_bulb.turn_on()
+    result = await tapo_bulb.execute("turn_on", {})
     mock_device.on.assert_awaited_once()
     mock_device.get_device_info.assert_awaited()
     assert result["success"] is True
@@ -33,7 +33,7 @@ async def test_turn_on_delegates(tapo_bulb, mock_device):
 
 @pytest.mark.asyncio
 async def test_turn_off_delegates(tapo_bulb, mock_device):
-    result = await tapo_bulb.turn_off()
+    result = await tapo_bulb.execute("turn_off", {})
     mock_device.off.assert_awaited_once()
     mock_device.get_device_info.assert_awaited()
     assert result["success"] is True
@@ -41,7 +41,8 @@ async def test_turn_off_delegates(tapo_bulb, mock_device):
 
 @pytest.mark.asyncio
 async def test_get_status_parses_device_info(tapo_bulb):
-    status = await tapo_bulb.get_status()
+    result = await tapo_bulb.execute("get_status", {})
+    status = result["state"]
     assert status["is_on"] is True
     assert status["brightness"] == 75
     assert status["color_temp"] == 4000
@@ -50,13 +51,27 @@ async def test_get_status_parses_device_info(tapo_bulb):
 
 @pytest.mark.asyncio
 async def test_set_brightness_valid(tapo_bulb, mock_device):
-    result = await tapo_bulb.set_brightness(50)
+    result = await tapo_bulb.execute("set_brightness", {"brightness": 50})
     mock_device.set_brightness.assert_awaited_once_with(50)
     assert result["success"] is True
 
 
 @pytest.mark.asyncio
 async def test_set_brightness_invalid(tapo_bulb, mock_device):
-    result = await tapo_bulb.set_brightness(150)
+    result = await tapo_bulb.execute("set_brightness", {"brightness": 150})
     assert result["success"] is False
     mock_device.set_brightness.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_set_color_temp_valid(tapo_bulb, mock_device):
+    result = await tapo_bulb.execute("set_color_temp", {"color_temp": 4000})
+    mock_device.set_color_temperature.assert_awaited_once_with(4000)
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_set_color_temp_invalid(tapo_bulb, mock_device):
+    result = await tapo_bulb.execute("set_color_temp", {"color_temp": 2000})
+    assert result["success"] is False
+    mock_device.set_color_temperature.assert_not_awaited()

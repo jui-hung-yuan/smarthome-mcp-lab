@@ -69,7 +69,7 @@ async def turn_on() -> str:
     """
     logger.info("Tool called: turn_on")
     b = await get_bulb()
-    result = await b.turn_on()
+    result = await b.execute("turn_on", {})
     if not isinstance(b, MockTapoBulb):
         await state_logger.log_state_change(DEVICE_ID, "turn_on", result)
 
@@ -88,7 +88,7 @@ async def turn_off() -> str:
     """
     logger.info("Tool called: turn_off")
     b = await get_bulb()
-    result = await b.turn_off()
+    result = await b.execute("turn_off", {})
     if not isinstance(b, MockTapoBulb):
         await state_logger.log_state_change(DEVICE_ID, "turn_off", result)
 
@@ -107,7 +107,8 @@ async def get_status() -> str:
     """
     logger.info("Tool called: get_status")
     b = await get_bulb()
-    status = await b.get_status()
+    result = await b.execute("get_status", {})
+    status = result["state"]
 
     state_emoji = "💡" if status["is_on"] else "⚫"
     state_text = "ON" if status["is_on"] else "OFF"
@@ -134,7 +135,7 @@ async def set_brightness(brightness: int) -> str:
     """
     logger.info("Tool called: set_brightness(%d)", brightness)
     b = await get_bulb()
-    result = await b.set_brightness(brightness)
+    result = await b.execute("set_brightness", {"brightness": brightness})
     if not isinstance(b, MockTapoBulb):
         await state_logger.log_state_change(DEVICE_ID, "set_brightness", result)
 

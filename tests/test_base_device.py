@@ -47,7 +47,7 @@ class TestExecuteMethod:
     @pytest.mark.asyncio
     async def test_execute_turn_off(self, mock_bulb):
         """Test execute turn_off action."""
-        await mock_bulb.turn_on()
+        await mock_bulb.execute("turn_on", {})
 
         result = await mock_bulb.execute("turn_off", {})
 
@@ -99,46 +99,46 @@ class TestApplyDesiredState:
         """Test applying desired state to turn on."""
         await mock_bulb.apply_desired_state({"is_on": True})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is True
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is True
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_turn_off(self, mock_bulb):
         """Test applying desired state to turn off."""
-        await mock_bulb.turn_on()
+        await mock_bulb.execute("turn_on", {})
 
         await mock_bulb.apply_desired_state({"is_on": False})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is False
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is False
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_brightness(self, mock_bulb):
         """Test applying desired brightness."""
         await mock_bulb.apply_desired_state({"brightness": 50})
 
-        status = await mock_bulb.get_status()
-        assert status["brightness"] == 50
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["brightness"] == 50
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_multiple_fields(self, mock_bulb):
         """Test applying multiple desired state fields."""
         await mock_bulb.apply_desired_state({"is_on": True, "brightness": 75})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] is True
-        assert status["brightness"] == 75
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] is True
+        assert result["state"]["brightness"] == 75
 
     @pytest.mark.asyncio
     async def test_apply_desired_state_ignores_unknown_fields(self, mock_bulb):
         """Test that unknown fields are ignored without error."""
-        initial_status = await mock_bulb.get_status()
+        initial = await mock_bulb.execute("get_status", {})
 
         await mock_bulb.apply_desired_state({"unknown_field": "value"})
 
-        status = await mock_bulb.get_status()
-        assert status["is_on"] == initial_status["is_on"]
-        assert status["brightness"] == initial_status["brightness"]
+        result = await mock_bulb.execute("get_status", {})
+        assert result["state"]["is_on"] == initial["state"]["is_on"]
+        assert result["state"]["brightness"] == initial["state"]["brightness"]
 
 
 class TestGetShadowState:
@@ -156,8 +156,8 @@ class TestGetShadowState:
     @pytest.mark.asyncio
     async def test_get_shadow_state_reflects_current_state(self, mock_bulb):
         """Test that get_shadow_state reflects the current device state."""
-        await mock_bulb.turn_on()
-        await mock_bulb.set_brightness(42)
+        await mock_bulb.execute("turn_on", {})
+        await mock_bulb.execute("set_brightness", {"brightness": 42})
 
         state = await mock_bulb.get_shadow_state()
 
