@@ -3,7 +3,6 @@
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -108,7 +107,7 @@ class MemoryManager:
         content: str,
         mode: Literal["append", "overwrite"] = "append",
     ) -> None:
-        """Write to .agent_memory/<rel_path>, mark file dirty."""
+        """Write to ~/.smarthome/memory/<rel_path>, mark file dirty."""
         target = self._dir / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -175,11 +174,6 @@ class MemoryManager:
             (device_id, action, json.dumps(params), json.dumps(result), time.time()),
         )
         self._conn.commit()
-
-    async def append_session_summary(self, summary: str) -> None:
-        """Append summary to today's daily log."""
-        today = date.today().isoformat()
-        await self.write(f"memory/{today}.md", f"## Session {_timestamp()}\n{summary}\n")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -271,7 +265,3 @@ class MemoryManager:
         except Exception as e:
             logger.warning("Vector search error: %s", e)
             return []
-
-
-def _timestamp() -> str:
-    return time.strftime("%Y-%m-%d %H:%M")

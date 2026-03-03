@@ -2,7 +2,6 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import anthropic
@@ -16,6 +15,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Tool definitions sent to Claude API
 # ---------------------------------------------------------------------------
+
+_NO_REPLY = "NO_REPLY"
+
+_MEMORY_FLUSH_PROMPT = f"""\
+Session ended. Review the conversation and decide what's worth recording to the daily log.
+
+Write to the daily log (use memory_write with path "memory/YYYY-MM-DD.md") ONLY if the session contained:
+- A new user preference or habit (e.g. "I always want warm light for reading")
+- Context that would help future sessions (e.g. schedules, routines, named scenes)
+- Something the user explicitly asked to remember
+
+Do NOT record:
+- Routine device commands (turn on/off, status check, brightness adjustment)
+- Simple one-off requests with no lasting relevance
+- Anything already captured in MEMORY.md or USER.md
+
+If nothing is worth recording, reply with exactly: {_NO_REPLY}"""
 
 _TOOLS: list[dict[str, Any]] = [
     {
@@ -77,7 +93,7 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path within .agent_memory/ (e.g. 'USER.md')",
+                    "description": "Relative path within ~/.smarthome/memory/ (e.g. 'USER.md')",
                 },
                 "content": {
                     "type": "string",
@@ -128,7 +144,6 @@ class AgentLoop:
         system_prompt = self._build_system_prompt(session_context)
 
         conversation: list[dict[str, Any]] = []
-        session_turns: list[str] = []
 
         while True:
             try:
@@ -143,18 +158,15 @@ class AgentLoop:
                 continue
 
             conversation.append({"role": "user", "content": user_input})
-            session_turns.append(f"User: {user_input}")
 
             response_text = await self._agent_turn(system_prompt, conversation)
 
             print(f"\n{response_text}\n")
             conversation.append({"role": "assistant", "content": response_text})
-            session_turns.append(f"Assistant: {response_text[:200]}{'...' if len(response_text) > 200 else ''}")
 
-        # Append session summary
-        if session_turns:
-            summary = self._summarize_turns(session_turns)
-            await self._memory.append_session_summary(summary)
+        # Let Claude decide what (if anything) is worth writing to the daily log
+        if conversation:
+            await self._flush_memory(system_prompt, conversation)
 
     async def _agent_turn(
         self,
@@ -265,7 +277,7 @@ You have persistent memory across sessions. Use it proactively:
 **Memory files:**
 - `USER.md` — user preferences and working style
 - `MEMORY.md` — key facts, decisions, routines
-- `memory/YYYY-MM-DD.md` — daily logs (written automatically at session end, do not write here directly)
+- `memory/YYYY-MM-DD.md` — daily logs (notable events only, not routine commands)
 
 Always append (`mode: append`) unless correcting a specific entry.""",
         ]
@@ -279,17 +291,27 @@ Always append (`mode: append`) unless correcting a specific entry.""",
 
         return "\n\n".join(parts)
 
+    async def _flush_memory(
+        self,
+        system_prompt: str,
+        conversation: list[dict[str, Any]],
+    ) -> None:
+        """Ask Claude to decide what (if anything) is worth writing to the daily log."""
+        from datetime import date
+        messages = list(conversation)
+        today = date.today().isoformat()
+        flush_prompt = _MEMORY_FLUSH_PROMPT.replace("YYYY-MM-DD", today)
+        messages.append({"role": "user", "content": flush_prompt})
+        try:
+            reply = await self._agent_turn(system_prompt, messages)
+            if reply.strip().startswith(_NO_REPLY):
+                logger.debug("Memory flush: nothing worth recording.")
+        except Exception as e:
+            logger.warning("Memory flush failed: %s", e)
+
     @staticmethod
     def _extract_text(response: anthropic.types.Message) -> str:
         for block in response.content:
             if hasattr(block, "text"):
                 return block.text
         return "(no response)"
-
-    @staticmethod
-    def _summarize_turns(turns: list[str]) -> str:
-        """Produce a brief bulleted summary from conversation turns."""
-        lines = ["### Summary"]
-        for turn in turns[:20]:  # cap to avoid huge entries
-            lines.append(f"- {turn[:120]}")
-        return "\n".join(lines)
