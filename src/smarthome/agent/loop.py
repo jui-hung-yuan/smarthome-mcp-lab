@@ -1,5 +1,6 @@
 """AgentLoop: tool-use agent loop with memory and skill dispatch."""
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -168,6 +169,31 @@ class AgentLoop:
         if conversation:
             await self._flush_memory(system_prompt, conversation)
 
+    async def build_system_prompt(self) -> str:
+        """Build the system prompt with current memory context. Call once per session."""
+        session_context = await self._memory.load_session_context()
+        return self._build_system_prompt(session_context)
+
+    async def turn(
+        self,
+        system_prompt: str,
+        conversation: list[dict],
+        user_message: str,
+    ) -> str:
+        """Append user message, run agent turn, append response. Returns response text."""
+        conversation.append({"role": "user", "content": user_message})
+        response = await self._agent_turn(system_prompt, conversation)
+        conversation.append({"role": "assistant", "content": response})
+        return response
+
+    async def flush_memory(
+        self,
+        system_prompt: str,
+        conversation: list[dict[str, Any]],
+    ) -> None:
+        """Flush session memory to daily log (called on session eviction)."""
+        await self._flush_memory(system_prompt, conversation)
+
     async def _agent_turn(
         self,
         system_prompt: str,
@@ -177,7 +203,8 @@ class AgentLoop:
         messages = list(conversation)
 
         while True:
-            response = self._client.messages.create(
+            response = await asyncio.to_thread(
+                self._client.messages.create,
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
                 system=system_prompt,
