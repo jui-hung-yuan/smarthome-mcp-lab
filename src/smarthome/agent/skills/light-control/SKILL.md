@@ -12,6 +12,7 @@ description: Control the TAPO L530E smart bulb — turn on/off, set brightness (
 | `turn_off` | none | Turn the bulb off |
 | `set_brightness` | `brightness: int (1–100)` | Set brightness level |
 | `set_color_temp` | `color_temp: int (2500–6500)` | Set color temperature in Kelvin |
+| `set_color` | `color_name: str` | Set bulb to a named color (e.g. "Lime", "BlueViolet") |
 | `get_status` | none | Retrieve current bulb state |
 
 ## Usage
@@ -33,3 +34,20 @@ execute_skill(skill_name="light-control", action="get_status", params={})
 - Brightness 70–100: bright / task lighting
 - Color temp 2500–3000 K: warm white (evening / movie)
 - Color temp 5000–6500 K: cool daylight (focus / morning)
+- `set_color` and `set_color_temp` are mutually exclusive modes; using one clears the other
+
+## Color Palette UX
+
+When the user asks to change the bulb color or asks "what colors are available":
+1. Read the palette from `USER.md` (section `## Light Color Palette`) — it is already in your session context.
+2. Present it as a numbered list, e.g.:
+   ```
+   1) Candlelight — Cozy amber
+   2) AliceBlue — Icy pale blue
+   3) Lime — Neon acid green
+   4) BlueViolet — Deep rich purple
+   ```
+3. Wait for the user to reply with a number.
+4. Call `execute_skill("light-control", "set_color", {"color_name": "<name>"})` using the corresponding name.
+
+If the user asks to add, remove, or replace a color in the palette, use `memory_write` to update the `## Light Color Palette` section in `USER.md`.

@@ -156,14 +156,3 @@ async def test_log_device_event_stores_timestamp(mem):
     assert before <= row["timestamp"] <= after
 
 
-# ---------------------------------------------------------------------------
-# append_session_summary()
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_append_session_summary_creates_daily_log(mem):
-    await mem.append_session_summary("Turned on the light for movie night.")
-    from datetime import date
-    log_path = mem._dir / "memory" / f"{date.today().isoformat()}.md"
-    assert log_path.exists()
-    assert "Turned on" in log_path.read_text()

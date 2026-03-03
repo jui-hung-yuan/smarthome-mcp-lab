@@ -7,6 +7,7 @@ from typing import Dict, Any
 from datetime import datetime
 
 from tapo import ApiClient
+from tapo.requests import Color
 
 from smarthome.devices.base import BaseDevice
 
@@ -25,6 +26,7 @@ class MockTapoBulb(BaseDevice):
         "turn_off": [],
         "set_brightness": ["brightness"],
         "set_color_temp": ["color_temp"],
+        "set_color": ["color_name"],
         "get_status": [],
     }
 
@@ -47,6 +49,9 @@ class MockTapoBulb(BaseDevice):
             "is_on": False,
             "brightness": 100,
             "color_temp": 2700,
+            "hue": 0,
+            "saturation": 0,
+            "color_mode": "color_temp",
             "last_updated": datetime.now().isoformat()
         }
 
@@ -64,7 +69,10 @@ class MockTapoBulb(BaseDevice):
         return {
             "is_on": self.state["is_on"],
             "brightness": self.state["brightness"],
-            "color_temp": self.state["color_temp"],
+            "color_temp": self.state.get("color_temp", 0),
+            "hue": self.state.get("hue", 0),
+            "saturation": self.state.get("saturation", 0),
+            "color_mode": self.state.get("color_mode", "color_temp"),
             "last_updated": self.state["last_updated"]
         }
 
@@ -76,7 +84,7 @@ class MockTapoBulb(BaseDevice):
 
     @property
     def supported_actions(self) -> list[str]:
-        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "get_status"]
+        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "set_color", "get_status"]
 
     async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if action not in self.supported_actions:
@@ -133,10 +141,36 @@ class MockTapoBulb(BaseDevice):
                 }
             logger.info(f"Setting color temperature to {color_temp} K (mock)")
             self.state["color_temp"] = color_temp
+            self.state["hue"] = 0
+            self.state["saturation"] = 0
+            self.state["color_mode"] = "color_temp"
             self._save_state()
             return {
                 "success": True,
                 "message": f"Color temperature set to {color_temp} K",
+                "state": self._get_status(),
+            }
+
+        if action == "set_color":
+            color_name = parameters.get("color_name")
+            if not color_name:
+                return {"success": False, "message": "color_name parameter required"}
+            color_obj = getattr(Color, color_name, None)
+            if color_obj is None:
+                return {
+                    "success": False,
+                    "message": f"Unknown color: {color_name}. Valid names are in the Color enum (e.g. Lime, BlueViolet, Candlelight).",
+                }
+            hue, saturation, _ = color_obj.get_color_config()
+            logger.info(f"Setting color to {color_name} (hue={hue}, sat={saturation}) (mock)")
+            self.state["hue"] = hue
+            self.state["saturation"] = saturation
+            self.state["color_temp"] = 0
+            self.state["color_mode"] = "color"
+            self._save_state()
+            return {
+                "success": True,
+                "message": f"Color set to {color_name}",
                 "state": self._get_status(),
             }
 
@@ -153,7 +187,10 @@ class MockTapoBulb(BaseDevice):
         return {
             "is_on": self.state["is_on"],
             "brightness": self.state["brightness"],
-            "color_temp": self.state["color_temp"],
+            "color_temp": self.state.get("color_temp", 0),
+            "hue": self.state.get("hue", 0),
+            "saturation": self.state.get("saturation", 0),
+            "color_mode": self.state.get("color_mode", "color_temp"),
         }
 
 
@@ -165,6 +202,7 @@ class TapoBulb(BaseDevice):
         "turn_off": [],
         "set_brightness": ["brightness"],
         "set_color_temp": ["color_temp"],
+        "set_color": ["color_name"],
         "get_status": [],
     }
 
@@ -179,10 +217,17 @@ class TapoBulb(BaseDevice):
 
     async def _get_status(self) -> Dict[str, Any]:
         info = await self._device.get_device_info()
+        hue = getattr(info, "hue", 0) or 0
+        saturation = getattr(info, "saturation", 0) or 0
+        color_temp = info.color_temp or 0
+        color_mode = "color" if hue != 0 or saturation != 0 else "color_temp"
         return {
             "is_on": info.device_on,
             "brightness": info.brightness,
-            "color_temp": info.color_temp,
+            "color_temp": color_temp,
+            "hue": hue,
+            "saturation": saturation,
+            "color_mode": color_mode,
             "last_updated": datetime.now().isoformat()
         }
 
@@ -194,7 +239,7 @@ class TapoBulb(BaseDevice):
 
     @property
     def supported_actions(self) -> list[str]:
-        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "get_status"]
+        return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "set_color", "get_status"]
 
     async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if action not in self.supported_actions:
@@ -260,6 +305,24 @@ class TapoBulb(BaseDevice):
                 "state": await self._get_status(),
             }
 
+        if action == "set_color":
+            color_name = parameters.get("color_name")
+            if not color_name:
+                return {"success": False, "message": "color_name parameter required"}
+            color_obj = getattr(Color, color_name, None)
+            if color_obj is None:
+                return {
+                    "success": False,
+                    "message": f"Unknown color: {color_name}. Valid names are in the Color enum (e.g. Lime, BlueViolet, Candlelight).",
+                }
+            logger.info(f"Setting color to {color_name} (real)")
+            await self._device.set_color(color_obj)
+            return {
+                "success": True,
+                "message": f"Color set to {color_name}",
+                "state": await self._get_status(),
+            }
+
         if action == "get_status":
             return {"success": True, "message": "Status retrieved", "state": await self._get_status()}
 
@@ -275,4 +338,7 @@ class TapoBulb(BaseDevice):
             "is_on": status["is_on"],
             "brightness": status["brightness"],
             "color_temp": status["color_temp"],
+            "hue": status["hue"],
+            "saturation": status["saturation"],
+            "color_mode": status["color_mode"],
         }
