@@ -10,7 +10,7 @@ Smart home controller for a TAPO L530E bulb. Three control paths are implemented
 |------|--------|-------------|
 | **Local MCP** — FastMCP server, Claude Desktop subprocess | ✅ Done | `src/smarthome/aws_mcp/mcp_servers/light_server.py` |
 | **Remote MCP** — AgentCore Gateway + Cognito + Lambda + IoT Core | ✅ Done | `src/smarthome/aws_mcp/lambda_handler.py` |
-| **Local Agent** — OpenClaw-inspired, Markdown memory, skills | 🚧 Next | `src/smarthome/agent/` (planned) |
+| **Local Agent** — OpenClaw-inspired, Markdown memory, skills | ✅ Done | `src/smarthome/agent/__main__.py` |
 
 ## Repository Structure
 
@@ -26,9 +26,21 @@ src/smarthome/
 │   ├── logging/          # Fire-and-forget DynamoDB state logger
 │   ├── mcp_servers/      # FastMCP server (light_server.py)
 │   └── lambda_handler.py # AgentCore Gateway Lambda entry point
-└── agent/                # (planned) Local-first agent
-    ├── memory/           # Markdown-based conversation memory
-    └── skills/           # Pluggable device control skills
+└── agent/                # Local-first agent loop (CLI)
+    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock]`
+    ├── config.py         # AgentConfig: paths, model, mock flag
+    ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
+    ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
+    ├── memory/
+    │   ├── manager.py    # MemoryManager: search, write, sync, session context
+    │   ├── schema.py     # SQLite schema: files, chunks, FTS5, vec, device_events
+    │   ├── chunker.py    # Markdown → overlapping chunks (~400 tokens)
+    │   └── embedder.py   # OllamaEmbedder: async HTTP → ollama /api/embed
+    └── skills/
+        └── light-control/
+            ├── SKILL.md  # Skill docs + frontmatter (name, description)
+            └── scripts/
+                └── bulb.py  # execute(action, params) wraps TapoBulb/MockTapoBulb
 ```
 
 ## Commands
@@ -50,6 +62,11 @@ AWS_PROFILE=self uv run python scripts/aws/create_lambda.py
 
 # Test remote path end-to-end
 AWS_PROFILE=self uv run python scripts/aws/test_gateway.py
+
+# Local Agent
+uv run python -m smarthome.agent --mock    # mock bulb, no hardware needed
+uv run python -m smarthome.agent           # real bulb (requires TAPO_* in ~/.smarthome/.env)
+uv run python -m smarthome.agent --debug   # verbose logging
 ```
 
 Full setup instructions for both paths: **[docs/mcp-setup.md](docs/mcp-setup.md)**
@@ -71,32 +88,33 @@ Provisioning scripts in `scripts/aws/` (run in order for first-time setup):
 3. `package_lambda.py` + `create_lambda.py` — build zip, deploy Lambda
 4. `create_agentcore_gateway.py` — Gateway with Cognito JWT auth
 
-## Local Agent Path (planned)
+## Local Agent Path (implemented)
 
-Inspired by OpenClaw's architecture: a local agent loop with Markdown-based persistent memory and pluggable skills. No cloud dependency — runs entirely on the local machine.
+A local agent loop with Markdown-based persistent memory and pluggable skills. No cloud dependency — runs entirely on the local machine.
 
 ```
-User  →  Agent loop (src/smarthome/agent/)
-          ├── memory/     Markdown files, one per topic/session
-          │               loaded as context at conversation start
-          └── skills/     Pluggable async callables
-                          └── bulb_skill.py  ←  wraps smarthome.devices
+User  →  AgentLoop (loop.py)
+          ├── memory/   ~/.smarthome/memory/ (MEMORY.md, USER.md, SOUL.md, daily logs)
+          └── skills/   light-control → TapoBulb / MockTapoBulb
 ```
 
-**Bulb control as a skill**: the `TapoBulb` / `MockTapoBulb` implementations in `smarthome.devices` are wrapped as a skill that the agent can call. The skill interface mirrors the existing `execute()` method on `BaseDevice`.
+**3 built-in tools** Claude can call:
+1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
+2. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
+3. `memory_write(path, content, mode)` — persists to Markdown files
 
-Planned module layout:
-```
-src/smarthome/agent/
-├── __init__.py
-├── loop.py          # Main agent loop (read memory → call LLM → run skill → update memory)
-├── memory/
-│   ├── manager.py   # Load/save/search Markdown memory files
-│   └── *.md         # Persisted memory (gitignored)
-└── skills/
-    ├── base.py      # Skill protocol / abstract interface
-    └── bulb_skill.py # Wraps smarthome.devices.TapoBulb
-```
+**Configuration** (`~/.smarthome/.env`):
+- `ANTHROPIC_API_KEY` — required
+- `TAPO_USERNAME`, `TAPO_PASSWORD`, `TAPO_IP_ADDRESS` — required for real bulb; omit for `--mock`
+
+**Memory storage** (`~/.smarthome/memory/`):
+- Markdown files: `MEMORY.md` (facts/routines), `USER.md` (preferences), `SOUL.md` (tone), `YYYY-MM-DD.md` (daily logs)
+- SQLite index at `.index/memory.db`: FTS5 (BM25) + optional sqlite-vec (384-dim vectors)
+- Embeddings via `ollama pull embeddinggemma` (~622 MB); graceful BM25-only fallback if ollama unavailable
+
+**Mock state** shared across all paths: `~/.smarthome/tapo_bulb_state.json`
+
+**Adding a skill**: drop a folder into `skills/`, write `SKILL.md` + `scripts/*.py` exposing `execute(action, params) → dict`. Zero changes to `loop.py`.
 
 ## Key Patterns
 
@@ -104,3 +122,6 @@ src/smarthome/agent/
 - **MockTapoBulb**: in-memory implementation with optional JSON state persistence — use in all tests and `--mock` runs.
 - **Fire-and-forget logging**: `DynamoStateLogger` catches all exceptions and self-disables after first failure; MCP tools are never blocked by logging.
 - **FastMCP tools**: defined with `@app.tool()` decorator, return plain strings.
+- **SkillLoader** (`skill_loader.py`): scans `skills/*/SKILL.md` at startup, dynamically imports scripts, builds system prompt section, exposes single `execute_skill` tool to Claude.
+- **MemoryManager** (`memory/manager.py`): incremental file sync (hash+mtime), hybrid BM25+vector search with RRF merge, session context loader.
+- **OllamaEmbedder** (`memory/embedder.py`): availability checked once on first call; if ollama unreachable, vector search disabled silently, BM25 still works.

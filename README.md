@@ -8,7 +8,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 |------|--------|-------------|
 | **Local MCP** | ✅ Done | FastMCP server as Claude Desktop subprocess, LAN control |
 | **Remote MCP** | ✅ Done | AgentCore Gateway + Cognito + Lambda + IoT Core |
-| **Local Agent** | 🚧 Next | OpenClaw-inspired agent loop with Markdown memory and device skills |
+| **Local Agent** | ✅ Done | OpenClaw-inspired agent loop with Markdown memory, hybrid search, and device skills |
 
 ## Features
 
@@ -21,6 +21,10 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **AgentCore Gateway** — remote MCP server with Cognito OAuth for Claude web app
 - **Multi-device support** — single bridge manages multiple devices via `DeviceRegistry`
 - **Device-agnostic architecture** — `BaseDevice` interface makes adding new device types straightforward
+- **Local agent loop** — interactive CLI, persistent memory, no cloud dependency
+- **Hybrid memory search** — BM25 (FTS5) + vector embeddings (ollama) merged via Reciprocal Rank Fusion
+- **Pluggable skills** — drop a folder into `skills/`, write `SKILL.md` — zero changes to the loop
+- **Color temperature control** — `set_color_temp` (2500–6500 K) via the agent skill
 
 ## Project Structure
 
@@ -36,13 +40,25 @@ src/smarthome/
 │   ├── logging/          # DynamoDB state logger
 │   ├── mcp_servers/      # FastMCP server (light_server.py)
 │   └── lambda_handler.py # AgentCore Gateway Lambda entry point
-└── agent/                # (planned) Local-first agent loop
-    ├── memory/           # Markdown-based conversation memory
-    └── skills/           # Pluggable device control skills
+└── agent/                # Local-first agent loop (CLI)
+    ├── __main__.py       # Entry: `python -m smarthome.agent [--mock]`
+    ├── config.py         # AgentConfig: paths, model, mock flag
+    ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
+    ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
+    ├── memory/
+    │   ├── manager.py    # MemoryManager: search, write, sync, session context
+    │   ├── schema.py     # SQLite schema: files, chunks, FTS5, vec, device_events
+    │   ├── chunker.py    # Markdown → overlapping chunks (~400 tokens)
+    │   └── embedder.py   # OllamaEmbedder: async HTTP → ollama /api/embed
+    └── skills/
+        └── light-control/
+            ├── SKILL.md  # Skill docs + frontmatter (name, description)
+            └── scripts/
+                └── bulb.py  # execute(action, params) wraps TapoBulb/MockTapoBulb
 
 scripts/aws/              # AWS provisioning and operation scripts
 docs/                     # Setup guides and architecture notes
-tests/                    # Unit tests (104 tests, all passing)
+tests/                    # Unit tests (151 tests, all passing)
 ```
 
 ## How It Works
@@ -72,18 +88,24 @@ Claude Web App
 
 See [docs/claude-web-oauth.md](docs/claude-web-oauth.md) for the OAuth flow details and [docs/mcp-setup.md](docs/mcp-setup.md) for full provisioning steps.
 
-### Local Agent (planned)
+### Local Agent
 
 An OpenClaw-inspired agent loop that runs entirely locally — no cloud dependency:
 
 ```
-User → Agent loop
-         ├── memory/   Markdown files loaded as context each turn
-         └── skills/   Async callables wrapping smarthome.devices
-                       └── bulb_skill  ←  TapoBulb / MockTapoBulb
+User → AgentLoop
+         ├── memory/  ~/.smarthome/memory/ — MEMORY.md, USER.md, SOUL.md, daily logs
+         └── skills/  light-control — wraps TapoBulb / MockTapoBulb
 ```
 
-The bulb becomes a **skill** the agent can invoke. Memory is persisted as plain Markdown files, one per topic, loaded at conversation start.
+**3 built-in tools** Claude can call:
+1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
+2. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
+3. `memory_write(path, content, mode)` — persists to Markdown files
+
+Memory is stored in `~/.smarthome/memory/` as Markdown files (`MEMORY.md`, `USER.md`, `SOUL.md`, daily logs), indexed in SQLite with FTS5 and optional sqlite-vec embeddings. Embeddings use `ollama`; BM25-only fallback if unavailable.
+
+**Adding a skill**: drop a folder under `skills/`, write `SKILL.md` + `scripts/*.py` with `execute(action, params) → dict`. Zero changes to `loop.py`.
 
 ### Device Layer
 
@@ -123,6 +145,31 @@ See **[docs/mcp-setup.md](docs/mcp-setup.md)** for full step-by-step instruction
 
 3. Restart Claude Desktop.
 
+### Quick start — Local Agent
+
+1. Add your Anthropic API key:
+   ```bash
+   mkdir -p ~/.smarthome
+   echo 'ANTHROPIC_API_KEY=sk-...' >> ~/.smarthome/.env
+   ```
+
+2. Seed memory files (optional but recommended):
+   ```bash
+   mkdir -p ~/.smarthome/memory
+   echo "# Memory" > ~/.smarthome/memory/MEMORY.md
+   echo "# User Preferences" > ~/.smarthome/memory/USER.md
+   ```
+
+3. Run with mock bulb (no hardware needed):
+   ```bash
+   uv run python -m smarthome.agent --mock
+   ```
+
+4. Run with real bulb — add `TAPO_USERNAME`, `TAPO_PASSWORD`, `TAPO_IP_ADDRESS` to `~/.smarthome/.env`, then:
+   ```bash
+   uv run python -m smarthome.agent
+   ```
+
 ### Quick start — Remote MCP (AWS)
 
 Run provisioning scripts in order (requires AWS profile `self`):
@@ -160,15 +207,18 @@ uv run fastmcp dev src/smarthome/aws_mcp/mcp_servers/light_server.py
 | `boto3` | AWS SDK (DynamoDB, IoT Core, Lambda, Cognito) |
 | `awsiotsdk` | AWS IoT Core MQTT client |
 | `moto` (dev) | In-memory AWS mock for tests |
+| `anthropic` | Claude API SDK (agent loop) |
+| `httpx` | Async HTTP client (ollama embeddings) |
+| `sqlite-vec` | Vector search extension for SQLite |
 
 ## What's Next
 
 - [x] Local MCP via Claude Desktop
 - [x] Remote MCP via AgentCore Gateway + Cognito OAuth
 - [x] Multi-device support via `DeviceRegistry`
-- [ ] Local agent loop with Markdown memory (`src/smarthome/agent/`)
-- [ ] Bulb control as an agent skill
-- [ ] Color temperature and RGB control
+- [x] Local agent loop with Markdown memory
+- [x] Bulb control as an agent skill
+- [x] Color temperature control
 - [ ] Additional device types (smart plugs, sensors)
 - [ ] Device auto-discovery on local network
 
