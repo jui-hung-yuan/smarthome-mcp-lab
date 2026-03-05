@@ -48,10 +48,15 @@ src/smarthome/
 ## Commands
 
 ```bash
+# Install dependencies
+uv sync --no-dev             # local agent only (e.g. Raspberry Pi)
+uv sync --extra aws-mcp      # full dev environment (includes AWS/MCP deps)
+
 # Run tests
 uv run pytest tests/ -v
 
 # Local MCP dev mode (FastMCP test UI at localhost:6274)
+uv sync --extra aws-mcp
 uv run fastmcp dev src/smarthome/aws_mcp/mcp_servers/light_server.py
 
 # IoT Bridge (remote path, requires AWS setup)

@@ -221,16 +221,39 @@ uv run fastmcp dev src/smarthome/aws_mcp/mcp_servers/light_server.py
 
 ## Key Dependencies
 
+Dependencies are split so the local agent can be installed without the AWS/MCP stack.
+
+**Core (local agent):**
+
+| Package | Purpose |
+|---------|---------|
+| `anthropic` | Claude API SDK (agent loop) |
+| `tapo` | TAPO device control over local network |
+| `slack-bolt` | Slack Socket Mode bot |
+| `sqlite-vec` | Vector search extension for SQLite |
+| `httpx` | Async HTTP client (ollama embeddings) |
+| `aiohttp`, `pydantic`, `python-dotenv` | HTTP, validation, env config |
+
+**`aws-mcp` extra (MCP paths only):**
+
 | Package | Purpose |
 |---------|---------|
 | `fastmcp` | MCP server framework |
-| `tapo` | TAPO device control over local network |
 | `boto3` | AWS SDK (DynamoDB, IoT Core, Lambda, Cognito) |
 | `awsiotsdk` | AWS IoT Core MQTT client |
-| `moto` (dev) | In-memory AWS mock for tests |
-| `anthropic` | Claude API SDK (agent loop) |
-| `httpx` | Async HTTP client (ollama embeddings) |
-| `sqlite-vec` | Vector search extension for SQLite |
+
+**Dev:**
+
+| Package | Purpose |
+|---------|---------|
+| `moto[dynamodb]` | In-memory AWS mock for tests |
+| `pytest`, `pytest-asyncio` | Test runner |
+
+Install for each environment:
+```bash
+uv sync --no-dev             # Raspberry Pi — local agent only
+uv sync --extra aws-mcp      # Dev machine — everything
+```
 
 ## What's Next
 
