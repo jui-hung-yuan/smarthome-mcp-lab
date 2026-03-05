@@ -135,6 +135,7 @@ class AgentLoop:
         self._memory = memory
         self._skills = skills
         self._client = anthropic.Anthropic(max_retries=5)
+        self._pending_blocks: list | None = None
 
     async def run_session(self) -> None:
         """Interactive CLI session."""
@@ -201,6 +202,7 @@ class AgentLoop:
     ) -> str:
         """Run the agentic tool-use loop for one user turn, return final text."""
         messages = list(conversation)
+        self._pending_blocks = None
 
         while True:
             response = await asyncio.to_thread(
@@ -247,6 +249,8 @@ class AgentLoop:
                 action=inputs.get("action", ""),
                 params=inputs.get("params") or {},
             )
+            if "_slack_blocks" in result:
+                self._pending_blocks = result.pop("_slack_blocks")
             # Log device event
             await self._memory.log_device_event(
                 device_id=inputs.get("skill_name", "unknown"),
@@ -282,6 +286,12 @@ class AgentLoop:
 
         else:
             return {"success": False, "message": f"Unknown tool: {name}"}
+
+    def take_pending_blocks(self) -> list | None:
+        """Return and clear pending Slack blocks from the last agent turn."""
+        blocks = self._pending_blocks
+        self._pending_blocks = None
+        return blocks
 
     def _build_system_prompt(self, session_context: str) -> str:
         parts = [

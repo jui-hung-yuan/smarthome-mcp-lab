@@ -60,11 +60,78 @@ async def _get_device():
     return _device
 
 
+_DEFAULT_PALETTE = [
+    ("Candlelight", "🕯️", "Cozy amber"),
+    ("AliceBlue",   "💙", "Icy pale blue"),
+    ("Lime",        "🟢", "Neon acid green"),
+    ("BlueViolet",  "🟣", "Deep rich purple"),
+]
+
+
+def _parse_palette_from_user_md():
+    """Parse ## Light Color Palette table from USER.md. Returns list of (name, emoji, mood) or None."""
+    try:
+        user_md = Path.home() / ".smarthome" / "memory" / "USER.md"
+        if not user_md.exists():
+            return None
+        text = user_md.read_text()
+        section = text.split("## Light Color Palette", 1)
+        if len(section) < 2:
+            return None
+        rows = []
+        past_header = False
+        for line in section[1].splitlines():
+            if not line.startswith("|"):
+                continue
+            # Separator row (e.g. |---|---|) — marks end of header
+            if not set(line.replace("|", "").replace("-", "").replace(" ", "")):
+                past_header = True
+                continue
+            if not past_header:
+                continue  # skip header row
+            parts = [p.strip() for p in line.strip("|").split("|")]
+            if len(parts) >= 4 and parts[1]:
+                # New 4-column format: | # | Name | Emoji | Mood |
+                rows.append((parts[1], parts[2], parts[3]))
+            elif len(parts) >= 3 and parts[1]:
+                # Old 3-column format: | # | Name | Mood |
+                rows.append((parts[1], "💡", parts[2]))
+        return rows if rows else None
+    except Exception:
+        return None
+
+
 async def execute(action: str, params: dict) -> dict:
     """Execute a light-control action.
 
-    Supported actions: turn_on, turn_off, set_brightness, set_color_temp, get_status
+    Supported actions: turn_on, turn_off, set_brightness, set_color_temp, set_color,
+                       show_palette, get_status
     """
+    if action == "show_palette":
+        palette = _parse_palette_from_user_md() or _DEFAULT_PALETTE
+        blocks = [
+            {
+                "type": "actions",
+                "elements": [{
+                    "type": "static_select",
+                    "placeholder": {"type": "plain_text", "text": "Choose a color..."},
+                    "action_id": "color_picker",
+                    "options": [
+                        {
+                            "text": {"type": "plain_text", "text": f"{emoji} {name}"},
+                            "value": name,
+                        }
+                        for name, emoji, _ in palette
+                    ],
+                }],
+            },
+        ]
+        return {
+            "success": True,
+            "message": "Color palette dropdown shown. Ask the user to select a color from the dropdown.",
+            "_slack_blocks": blocks,
+        }
+
     try:
         device = await _get_device()
     except RuntimeError as e:

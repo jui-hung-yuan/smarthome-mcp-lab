@@ -13,6 +13,7 @@ description: Control the TAPO L530E smart bulb — turn on/off, set brightness (
 | `set_brightness` | `brightness: int (1–100)` | Set brightness level |
 | `set_color_temp` | `color_temp: int (2500–6500)` | Set color temperature in Kelvin |
 | `set_color` | `color_name: str` | Set bulb to a named color (e.g. "Lime", "BlueViolet") |
+| `show_palette` | none | Return color palette text + Slack dropdown buttons |
 | `get_status` | none | Retrieve current bulb state |
 
 ## Usage
@@ -39,15 +40,9 @@ execute_skill(skill_name="light-control", action="get_status", params={})
 ## Color Palette UX
 
 When the user asks to change the bulb color or asks "what colors are available":
-1. Read the palette from `USER.md` (section `## Light Color Palette`) — it is already in your session context.
-2. Present it as a numbered list, e.g.:
-   ```
-   1) Candlelight — Cozy amber
-   2) AliceBlue — Icy pale blue
-   3) Lime — Neon acid green
-   4) BlueViolet — Deep rich purple
-   ```
-3. Wait for the user to reply with a number.
-4. Call `execute_skill("light-control", "set_color", {"color_name": "<name>"})` using the corresponding name.
+1. Call `execute_skill("light-control", "show_palette", {})` — it returns a formatted text list for you to relay, and automatically provides click buttons in Slack. Do not type the list manually.
+2. Wait for the user to reply with a number or name.
+3. Call `execute_skill("light-control", "set_color", {"color_name": "<name>"})` using the corresponding name.
 
 If the user asks to add, remove, or replace a color in the palette, use `memory_write` to update the `## Light Color Palette` section in `USER.md`.
+Table format: `| # | Name | Emoji | Mood |`

@@ -49,6 +49,7 @@ class SlackAdapter:
         # In DMs (channel_type "im"): respond to every message (no @mention needed).
         self._app.event("app_mention")(self._on_message)
         self._app.event("message")(self._on_dm)
+        self._app.action("color_picker")(self._on_color_pick)
 
     async def start(self) -> None:
         """Start Socket Mode handler and idle cleanup task."""
@@ -89,7 +90,11 @@ class SlackAdapter:
             logger.exception("AgentLoop.turn() failed: %s", e)
             response = "Sorry, something went wrong. Please try again."
 
-        await say(text=response, thread_ts=thread_ts)
+        blocks = self._loop.take_pending_blocks()
+        kwargs: dict[str, Any] = {"text": response, "thread_ts": thread_ts}
+        if blocks:
+            kwargs["blocks"] = blocks
+        await say(**kwargs)
 
     async def _get_session(self, key: str) -> SlackSession:
         async with self._sessions_lock:
@@ -98,6 +103,17 @@ class SlackAdapter:
                 self._sessions[key] = SlackSession(system_prompt=system_prompt)
                 logger.debug("Created new session: %s", key)
             return self._sessions[key]
+
+    async def _on_color_pick(self, ack, body, client) -> None:
+        await ack()
+        color_name = body["actions"][0]["selected_option"]["value"]
+        channel = body["channel"]["id"]
+        thread_ts = body["message"].get("thread_ts") or body["message"]["ts"]
+        result = await self._loop._skills.execute(
+            "light-control", "set_color", {"color_name": color_name}
+        )
+        text = f"Set to {color_name}." if result.get("success") else result.get("message", "Failed.")
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text)
 
     async def _evict_idle_sessions(self) -> None:
         ttl_seconds = self._config.session_ttl_minutes * 60
