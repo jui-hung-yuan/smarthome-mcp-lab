@@ -31,6 +31,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Pluggable skills** — drop a folder into `skills/`, write `SKILL.md` — zero changes to the loop
 - **Progressive skill disclosure** — only a skill index (name + description) is in the system prompt at startup; full docs load on first use via `describe_skill`, then stay injected for the session
 - **Color temperature control** — `set_color_temp` (2500–6500 K) via the agent skill
+- **Heartbeat scheduler** — `HeartbeatScheduler` fires time-based automations from `SCHEDULE.md`; Claude manages tasks via the `schedule_task` tool (add/remove/list), changes persist across restarts
 
 ## Project Structure
 
@@ -49,7 +50,8 @@ src/smarthome/
 └── agent/                # Local-first agent loop (CLI + Slack)
     ├── __main__.py       # Entry: `python -m smarthome.agent [--mock|--slack]`
     ├── config.py         # AgentConfig: paths, model, mock flag
-    ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
+    ├── loop.py           # AgentLoop: Claude tool-use loop + 5 built-in tools
+    ├── scheduler.py      # HeartbeatScheduler: fires SCHEDULE.md tasks on a periodic tick
     ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
     ├── slack_adapter.py  # Slack channel adapter (Socket Mode, per-thread sessions)
     ├── memory/
@@ -65,7 +67,7 @@ src/smarthome/
 
 scripts/aws/              # AWS provisioning and operation scripts
 docs/                     # Setup guides and architecture notes
-tests/                    # Unit tests (151 tests, all passing)
+tests/                    # Unit tests (188 tests, all passing)
 ```
 
 ## How It Works
@@ -109,11 +111,12 @@ Slack input ↗     ├── memory/  ~/.smarthome/memory/ — MEMORY.md, USER.
 - **CLI** — interactive REPL, one session per process
 - **Slack** (`--slack`) — Socket Mode bot; one session per `(channel, thread)`, responds to `@mention` in channels and all messages in DMs; idle sessions auto-evict after 30 min with memory flush
 
-**4 built-in tools** Claude can call:
+**5 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
 2. `describe_skill(skill_name)` — loads full skill docs once; injected into system prompt for the session
 3. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
 4. `memory_write(path, content, mode)` — persists to Markdown files
+5. `schedule_task(action, ...)` — add/remove/list scheduled automations in `SCHEDULE.md`
 
 Memory is stored in `~/.smarthome/memory/` as Markdown files (`MEMORY.md`, `USER.md`, `SOUL.md`, daily logs), indexed in SQLite with FTS5 and optional sqlite-vec embeddings. Embeddings use `ollama`; BM25-only fallback if unavailable.
 
@@ -237,6 +240,7 @@ uv run fastmcp dev src/smarthome/aws_mcp/mcp_servers/light_server.py
 - [x] Local agent loop with Markdown memory
 - [x] Bulb control as an agent skill
 - [x] Color temperature control
+- [x] Heartbeat scheduler with `SCHEDULE.md` and `schedule_task` tool
 - [ ] Additional device types (smart plugs, sensors)
 - [ ] Device auto-discovery on local network
 

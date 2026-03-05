@@ -43,6 +43,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--no-scheduler",
+        action="store_true",
+        help="Disable the heartbeat scheduler",
+    )
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Heartbeat tick interval in seconds (default: 1800)",
+    )
     return parser.parse_args()
 
 
@@ -65,6 +77,7 @@ async def main() -> None:
         model=args.model,
         mock=args.mock,
         **({"memory_dir": Path(args.memory_dir)} if args.memory_dir else {}),
+        **({"heartbeat_interval_seconds": args.heartbeat_interval} if args.heartbeat_interval else {}),
     )
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -88,7 +101,24 @@ async def main() -> None:
     for skill_name in skills.skill_names:
         skills.configure_skill(skill_name, mock=config.mock, config=config)
 
-    loop = AgentLoop(config=config, memory=memory, skills=skills)
+    # Seed SCHEDULE.md if it doesn't exist
+    from smarthome.agent.scheduler import HeartbeatScheduler, _DEFAULT_SCHEDULE
+
+    schedule_path = config.memory_dir / "SCHEDULE.md"
+    if not schedule_path.exists():
+        schedule_path.parent.mkdir(parents=True, exist_ok=True)
+        schedule_path.write_text(_DEFAULT_SCHEDULE)
+        logging.getLogger(__name__).info("Seeded %s with default dimming schedule", schedule_path)
+
+    scheduler: HeartbeatScheduler | None = None
+    if not args.no_scheduler:
+        scheduler = HeartbeatScheduler(
+            skills=skills,
+            schedule_path=schedule_path,
+            interval_seconds=config.heartbeat_interval_seconds,
+        )
+
+    loop = AgentLoop(config=config, memory=memory, skills=skills, scheduler=scheduler)
 
     if args.slack:
         bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -121,9 +151,24 @@ async def main() -> None:
         )
         adapter = SlackAdapter(loop=loop, config=slack_config)
         print("Starting Slack adapter (Socket Mode)…")
-        await adapter.start()
+        if scheduler:
+            await asyncio.gather(adapter.start(), scheduler.run())
+        else:
+            await adapter.start()
     else:
-        await loop.run_session()
+        if scheduler:
+            scheduler_task = asyncio.create_task(scheduler.run())
+            try:
+                await loop.run_session()
+            finally:
+                await scheduler.stop()
+                scheduler_task.cancel()
+                try:
+                    await scheduler_task
+                except asyncio.CancelledError:
+                    pass
+        else:
+            await loop.run_session()
 
 
 if __name__ == "__main__":

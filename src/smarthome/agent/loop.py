@@ -3,13 +3,17 @@
 import asyncio
 import json
 import logging
-from typing import Any
+import re
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
 from .config import AgentConfig
 from .memory.manager import MemoryManager
 from .skill_loader import SkillLoader
+
+if TYPE_CHECKING:
+    from .scheduler import HeartbeatScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +106,52 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "schedule_task",
+        "description": (
+            "Add, remove, or list scheduled automation tasks. "
+            "Changes persist across restarts and take effect on the next heartbeat tick."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "remove", "list"],
+                    "description": "Operation to perform",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Unique task name (required for add/remove)",
+                },
+                "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23,
+                    "description": "Hour in 24-hour local time (required for add)",
+                },
+                "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59,
+                    "description": "Minute (required for add)",
+                },
+                "skill": {
+                    "type": "string",
+                    "description": "Skill name to invoke (required for add)",
+                },
+                "skill_action": {
+                    "type": "string",
+                    "description": "Skill action to call (required for add)",
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Parameters to pass to the skill action",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "memory_write",
         "description": (
             "Write or append to a persistent memory file. "
@@ -132,6 +182,34 @@ _TOOLS: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
+# SCHEDULE.md helpers
+# ---------------------------------------------------------------------------
+
+def _read_schedule_raw(schedule_path) -> list[dict]:
+    """Parse the JSON block from SCHEDULE.md and return raw task dicts."""
+    from pathlib import Path
+    path = Path(schedule_path)
+    if not path.exists():
+        return []
+    text = path.read_text()
+    match = re.search(r"```json\s*([\s\S]*?)\s*```", text)
+    if not match:
+        return []
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+
+
+def _write_schedule_raw(schedule_path, tasks: list[dict]) -> None:
+    """Overwrite the JSON block in SCHEDULE.md with the given task list."""
+    from pathlib import Path
+    path = Path(schedule_path)
+    blob = json.dumps(tasks, indent=2)
+    path.write_text(f"# Schedule\n\n```json\n{blob}\n```\n")
+
+
+# ---------------------------------------------------------------------------
 # AgentLoop
 # ---------------------------------------------------------------------------
 
@@ -148,10 +226,12 @@ class AgentLoop:
         config: AgentConfig,
         memory: MemoryManager,
         skills: SkillLoader,
+        scheduler: "HeartbeatScheduler | None" = None,
     ):
         self._config = config
         self._memory = memory
         self._skills = skills
+        self._scheduler = scheduler
         self._client = anthropic.Anthropic(max_retries=5)
         self._pending_blocks: list | None = None
         self._loaded_skill_docs: dict[str, str] = {}   # skill_name → full body, injected into system prompt
@@ -168,7 +248,8 @@ class AgentLoop:
 
         while True:
             try:
-                user_input = input("> ").strip()
+                user_input = await asyncio.to_thread(input, "> ")
+                user_input = user_input.strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
@@ -319,8 +400,64 @@ class AgentLoop:
                 self._loaded_skill_docs[skill_name] = result["docs"]
             return result
 
+        elif name == "schedule_task":
+            return await self._handle_schedule_task(inputs)
+
         else:
             return {"success": False, "message": f"Unknown tool: {name}"}
+
+    async def _handle_schedule_task(self, inputs: dict) -> Any:
+        """Add, remove, or list scheduled tasks in SCHEDULE.md."""
+        if self._scheduler is None:
+            return {"success": False, "message": "Scheduler is disabled (--no-scheduler)."}
+
+        schedule_path = self._config.memory_dir / "SCHEDULE.md"
+        action = inputs.get("action", "")
+
+        # Read existing tasks as raw dicts
+        tasks = _read_schedule_raw(schedule_path)
+
+        if action == "list":
+            if not tasks:
+                return {"success": True, "tasks": [], "message": "No tasks scheduled."}
+            rows = [
+                f"{t['name']}: {t['hour']:02d}:{t['minute']:02d} → {t['skill']}.{t['action']}({t.get('params', {})})"
+                for t in tasks
+            ]
+            return {"success": True, "tasks": tasks, "message": "\n".join(rows)}
+
+        elif action == "add":
+            required = ["name", "hour", "minute", "skill", "skill_action"]
+            missing = [f for f in required if f not in inputs]
+            if missing:
+                return {"success": False, "message": f"Missing required fields: {missing}"}
+            name = inputs["name"]
+            # Remove existing task with same name if present
+            tasks = [t for t in tasks if t.get("name") != name]
+            tasks.append({
+                "name": name,
+                "hour": inputs["hour"],
+                "minute": inputs["minute"],
+                "skill": inputs["skill"],
+                "action": inputs["skill_action"],
+                "params": inputs.get("params") or {},
+            })
+            _write_schedule_raw(schedule_path, tasks)
+            return {"success": True, "message": f"Task '{name}' added at {inputs['hour']:02d}:{inputs['minute']:02d}."}
+
+        elif action == "remove":
+            name = inputs.get("name", "")
+            if not name:
+                return {"success": False, "message": "Provide 'name' to remove."}
+            before = len(tasks)
+            tasks = [t for t in tasks if t.get("name") != name]
+            if len(tasks) == before:
+                return {"success": False, "message": f"No task named '{name}' found."}
+            _write_schedule_raw(schedule_path, tasks)
+            return {"success": True, "message": f"Task '{name}' removed."}
+
+        else:
+            return {"success": False, "message": f"Unknown schedule action: {action}"}
 
     def take_pending_blocks(self) -> list | None:
         """Return and clear pending Slack blocks from the last agent turn."""

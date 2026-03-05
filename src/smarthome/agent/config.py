@@ -29,3 +29,6 @@ class AgentConfig:
 
     # Ollama base URL for embeddings
     ollama_url: str = "http://localhost:11434"
+
+    # Heartbeat scheduler interval in seconds (default: 30 min)
+    heartbeat_interval_seconds: int = 1800

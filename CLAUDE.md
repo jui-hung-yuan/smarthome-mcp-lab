@@ -29,7 +29,8 @@ src/smarthome/
 └── agent/                # Local-first agent loop (CLI)
     ├── __main__.py       # Entry: `python -m smarthome.agent [--mock|--slack]`
     ├── config.py         # AgentConfig: paths, model, mock flag
-    ├── loop.py           # AgentLoop: Claude tool-use loop + 3 built-in tools
+    ├── loop.py           # AgentLoop: Claude tool-use loop + 5 built-in tools
+    ├── scheduler.py      # HeartbeatScheduler: fires SCHEDULE.md tasks on a periodic tick
     ├── skill_loader.py   # Discovers skills/*/SKILL.md, dynamic dispatch
     ├── slack_adapter.py  # Slack channel adapter (Socket Mode, per-thread sessions)
     ├── memory/
@@ -107,11 +108,12 @@ Slack input ↗     ├── memory/   ~/.smarthome/memory/
 - **CLI** (`--` no flag): interactive REPL, one session per process
 - **Slack** (`--slack`): Socket Mode bot; one session per `(channel, thread)`, idle sessions auto-evicted after 30 min with memory flush. In channels, responds only to `@mention`; in DMs, responds to all messages.
 
-**4 built-in tools** Claude can call:
+**5 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
 2. `describe_skill(skill_name)` — loads full skill docs once; injected into system prompt for the session
 3. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
 4. `memory_write(path, content, mode)` — persists to Markdown files
+5. `schedule_task(action, ...)` — add/remove/list scheduled automations in `SCHEDULE.md`
 
 **Configuration** (`~/.smarthome/.env`):
 - `ANTHROPIC_API_KEY` — required
@@ -120,9 +122,15 @@ Slack input ↗     ├── memory/   ~/.smarthome/memory/
 - `SLACK_ALLOWED_USERS` — optional comma-separated Slack user IDs allowlist
 
 **Memory storage** (`~/.smarthome/memory/`):
-- Markdown files: `MEMORY.md` (facts/routines), `USER.md` (preferences), `SOUL.md` (tone), `YYYY-MM-DD.md` (daily logs)
+- Markdown files: `MEMORY.md` (facts/routines), `USER.md` (preferences), `SOUL.md` (tone), `YYYY-MM-DD.md` (daily logs), `SCHEDULE.md` (scheduled automations)
 - SQLite index at `.index/memory.db`: FTS5 (BM25) + optional sqlite-vec (384-dim vectors)
 - Embeddings via `ollama pull embeddinggemma` (~622 MB); graceful BM25-only fallback if ollama unavailable
+
+**Heartbeat scheduler** (`scheduler.py`):
+- `HeartbeatScheduler` runs a background asyncio task, waking every `heartbeat_interval_seconds` (default 30 min)
+- On each tick it reads `SCHEDULE.md`, finds tasks whose `hour:minute` falls in the elapsed window, and calls `skills.execute` for each
+- File is mtime-cached to avoid re-parsing on every tick
+- Claude manages tasks via the `schedule_task` tool (add/remove/list); changes persist across restarts
 
 **Mock state** shared across all paths: `~/.smarthome/tapo_bulb_state.json`
 
@@ -139,3 +147,4 @@ Slack input ↗     ├── memory/   ~/.smarthome/memory/
 - **MemoryManager** (`memory/manager.py`): incremental file sync (hash+mtime), hybrid BM25+vector search with RRF merge, session context loader.
 - **OllamaEmbedder** (`memory/embedder.py`): availability checked once on first call; if ollama unreachable, vector search disabled silently, BM25 still works.
 - **SlackAdapter** (`slack_adapter.py`): thin transport layer over `AgentLoop`; `AgentLoop.turn()` is the shared entry point for both CLI and Slack. Sessions keyed by `channel:thread_ts`.
+- **HeartbeatScheduler** (`scheduler.py`): background asyncio task; reads `SCHEDULE.md` (mtime-cached), fires tasks whose `hour:minute` falls in `(last_tick, now]`. Errors in individual tasks are caught and logged — never crash the loop. Disabled when `scheduler=None` (e.g. `--no-scheduler`).
