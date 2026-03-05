@@ -39,8 +39,7 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "execute_skill",
         "description": (
             "Execute a device-control skill. Use this to control smart home devices. "
-            "Check the Available Skills section of the system prompt for valid skill names, "
-            "actions, and parameter schemas."
+            "Always call describe_skill(skill_name) first to load actions and parameters."
         ),
         "input_schema": {
             "type": "object",
@@ -81,6 +80,25 @@ _TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "describe_skill",
+        "description": (
+            "Load full documentation for a skill before using it. "
+            "Returns supported actions, parameter schemas, and usage examples. "
+            "Call once per skill per session. Docs are injected into your active context "
+            "automatically and persist — do NOT call again for the same skill."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill to describe (e.g. 'light-control')",
+                },
+            },
+            "required": ["skill_name"],
         },
     },
     {
@@ -136,6 +154,7 @@ class AgentLoop:
         self._skills = skills
         self._client = anthropic.Anthropic(max_retries=5)
         self._pending_blocks: list | None = None
+        self._loaded_skill_docs: dict[str, str] = {}   # skill_name → full body, injected into system prompt
 
     async def run_session(self) -> None:
         """Interactive CLI session."""
@@ -164,7 +183,6 @@ class AgentLoop:
             response_text = await self._agent_turn(system_prompt, conversation)
 
             print(f"\n{response_text}\n")
-            conversation.append({"role": "assistant", "content": response_text})
 
         # Let Claude decide what (if anything) is worth writing to the daily log
         if conversation:
@@ -184,7 +202,6 @@ class AgentLoop:
         """Append user message, run agent turn, append response. Returns response text."""
         conversation.append({"role": "user", "content": user_message})
         response = await self._agent_turn(system_prompt, conversation)
-        conversation.append({"role": "assistant", "content": response})
         return response
 
     async def flush_memory(
@@ -200,8 +217,8 @@ class AgentLoop:
         system_prompt: str,
         conversation: list[dict[str, Any]],
     ) -> str:
-        """Run the agentic tool-use loop for one user turn, return final text."""
-        messages = list(conversation)
+        """Run the agentic tool-use loop. Mutates conversation in-place (tool calls,
+        tool results, final assistant text) so all history persists across turns."""
         self._pending_blocks = None
 
         while True:
@@ -209,17 +226,19 @@ class AgentLoop:
                 self._client.messages.create,
                 model=self._config.model,
                 max_tokens=self._config.max_tokens,
-                system=system_prompt,
+                system=self._effective_system_prompt(system_prompt),
                 tools=_TOOLS,
-                messages=messages,
+                messages=conversation,
             )
 
             if response.stop_reason == "end_turn":
-                return self._extract_text(response)
+                text = self._extract_text(response)
+                conversation.append({"role": "assistant", "content": text})
+                return text
 
             if response.stop_reason == "tool_use":
                 # Add assistant message with tool calls
-                messages.append({"role": "assistant", "content": response.content})
+                conversation.append({"role": "assistant", "content": response.content})
 
                 # Process each tool call
                 tool_results = []
@@ -234,10 +253,12 @@ class AgentLoop:
                         "content": json.dumps(result),
                     })
 
-                messages.append({"role": "user", "content": tool_results})
+                conversation.append({"role": "user", "content": tool_results})
             else:
                 # Unexpected stop reason; return whatever text we have
-                return self._extract_text(response)
+                text = self._extract_text(response)
+                conversation.append({"role": "assistant", "content": text})
+                return text
 
     async def _dispatch_tool(self, name: str, inputs: dict) -> Any:
         """Dispatch a tool call and return the result dict."""
@@ -284,6 +305,20 @@ class AgentLoop:
             )
             return {"success": True, "message": f"Written to {inputs.get('path')}"}
 
+        elif name == "describe_skill":
+            skill_name = inputs.get("skill_name", "")
+            if skill_name in self._loaded_skill_docs:
+                return {
+                    "success": True,
+                    "skill_name": skill_name,
+                    "docs": self._loaded_skill_docs[skill_name],
+                    "cached": True,
+                }
+            result = self._skills.describe_skill(skill_name)
+            if result.get("success"):
+                self._loaded_skill_docs[skill_name] = result["docs"]
+            return result
+
         else:
             return {"success": False, "message": f"Unknown tool: {name}"}
 
@@ -292,6 +327,15 @@ class AgentLoop:
         blocks = self._pending_blocks
         self._pending_blocks = None
         return blocks
+
+    def _effective_system_prompt(self, base: str) -> str:
+        """Return base system prompt extended with any loaded skill docs."""
+        if not self._loaded_skill_docs:
+            return base
+        parts = [base]
+        for name, docs in self._loaded_skill_docs.items():
+            parts.append(f"## Active Skill Docs: {name}\n\n{docs}")
+        return "\n\n".join(parts)
 
     def _build_system_prompt(self, session_context: str) -> str:
         parts = [

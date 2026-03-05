@@ -107,10 +107,11 @@ Slack input ↗     ├── memory/   ~/.smarthome/memory/
 - **CLI** (`--` no flag): interactive REPL, one session per process
 - **Slack** (`--slack`): Socket Mode bot; one session per `(channel, thread)`, idle sessions auto-evicted after 30 min with memory flush. In channels, responds only to `@mention`; in DMs, responds to all messages.
 
-**3 built-in tools** Claude can call:
+**4 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
-2. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
-3. `memory_write(path, content, mode)` — persists to Markdown files
+2. `describe_skill(skill_name)` — loads full skill docs once; injected into system prompt for the session
+3. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
+4. `memory_write(path, content, mode)` — persists to Markdown files
 
 **Configuration** (`~/.smarthome/.env`):
 - `ANTHROPIC_API_KEY` — required
@@ -133,7 +134,8 @@ Slack input ↗     ├── memory/   ~/.smarthome/memory/
 - **MockTapoBulb**: in-memory implementation with optional JSON state persistence — use in all tests and `--mock` runs.
 - **Fire-and-forget logging**: `DynamoStateLogger` catches all exceptions and self-disables after first failure; MCP tools are never blocked by logging.
 - **FastMCP tools**: defined with `@app.tool()` decorator, return plain strings.
-- **SkillLoader** (`skill_loader.py`): scans `skills/*/SKILL.md` at startup, dynamically imports scripts, builds system prompt section, exposes single `execute_skill` tool to Claude.
+- **SkillLoader** (`skill_loader.py`): scans `skills/*/SKILL.md` at startup, dynamically imports scripts, builds system prompt section, exposes `execute_skill` and `describe_skill` tools to Claude.
+- **Progressive skill disclosure** (`loop.py`): skill docs are omitted from the system prompt at startup (index only). Claude calls `describe_skill` once per skill; docs are cached in `_loaded_skill_docs` and injected into the system prompt via `_effective_system_prompt()` — persisting for the whole session without re-calling. Conversation history is mutated in-place so tool call/result pairs are never discarded between turns.
 - **MemoryManager** (`memory/manager.py`): incremental file sync (hash+mtime), hybrid BM25+vector search with RRF merge, session context loader.
 - **OllamaEmbedder** (`memory/embedder.py`): availability checked once on first call; if ollama unreachable, vector search disabled silently, BM25 still works.
 - **SlackAdapter** (`slack_adapter.py`): thin transport layer over `AgentLoop`; `AgentLoop.turn()` is the shared entry point for both CLI and Slack. Sessions keyed by `channel:thread_ts`.

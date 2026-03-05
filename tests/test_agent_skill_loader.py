@@ -89,15 +89,35 @@ def test_system_prompt_contains_description(loader):
     assert "A test skill for unit testing" in prompt
 
 
-def test_system_prompt_contains_skill_body(loader):
+def test_system_prompt_excludes_skill_body(loader):
+    """Level 1: full body must NOT appear; only name + description are listed."""
     prompt = loader.build_system_prompt_section()
-    assert "echo" in prompt
+    assert "echo" not in prompt
 
 
 def test_empty_loader_returns_empty_prompt(tmp_path):
     sl = SkillLoader(skills_dir=tmp_path / "no-skills")
     sl.load()
     assert sl.build_system_prompt_section() == ""
+
+
+def test_system_prompt_contains_disclosure_instructions(loader):
+    prompt = loader.build_system_prompt_section()
+    assert "describe_skill" in prompt
+
+
+def test_describe_skill_returns_body(loader):
+    result = loader.describe_skill("test-skill")
+    assert result["success"] is True
+    assert result["skill_name"] == "test-skill"
+    assert "echo" in result["docs"]
+
+
+def test_describe_skill_unknown_returns_error(loader):
+    result = loader.describe_skill("does-not-exist")
+    assert result["success"] is False
+    assert "does-not-exist" in result["message"]
+    assert "test-skill" in result["message"]
 
 
 # ---------------------------------------------------------------------------

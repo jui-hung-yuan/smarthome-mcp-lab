@@ -29,6 +29,7 @@ A personal learning exercise for exploring MCP (Model Context Protocol) and agen
 - **Persistent memory, no cloud dependency** — Markdown files + SQLite index, runs entirely on-device
 - **Hybrid memory search** — BM25 (FTS5) + vector embeddings (ollama) merged via Reciprocal Rank Fusion
 - **Pluggable skills** — drop a folder into `skills/`, write `SKILL.md` — zero changes to the loop
+- **Progressive skill disclosure** — only a skill index (name + description) is in the system prompt at startup; full docs load on first use via `describe_skill`, then stay injected for the session
 - **Color temperature control** — `set_color_temp` (2500–6500 K) via the agent skill
 
 ## Project Structure
@@ -108,10 +109,11 @@ Slack input ↗     ├── memory/  ~/.smarthome/memory/ — MEMORY.md, USER.
 - **CLI** — interactive REPL, one session per process
 - **Slack** (`--slack`) — Socket Mode bot; one session per `(channel, thread)`, responds to `@mention` in channels and all messages in DMs; idle sessions auto-evict after 30 min with memory flush
 
-**3 built-in tools** Claude can call:
+**4 built-in tools** Claude can call:
 1. `execute_skill(skill_name, action, params)` — dispatches to any loaded skill
-2. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
-3. `memory_write(path, content, mode)` — persists to Markdown files
+2. `describe_skill(skill_name)` — loads full skill docs once; injected into system prompt for the session
+3. `memory_search(query)` — hybrid BM25 + vector search (Reciprocal Rank Fusion)
+4. `memory_write(path, content, mode)` — persists to Markdown files
 
 Memory is stored in `~/.smarthome/memory/` as Markdown files (`MEMORY.md`, `USER.md`, `SOUL.md`, daily logs), indexed in SQLite with FTS5 and optional sqlite-vec embeddings. Embeddings use `ollama`; BM25-only fallback if unavailable.
 

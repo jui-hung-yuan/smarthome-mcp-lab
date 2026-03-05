@@ -111,19 +111,38 @@ class SkillLoader:
             return {"success": False, "message": f"Skill error: {e}"}
 
     def build_system_prompt_section(self) -> str:
-        """Return a system-prompt paragraph describing all available skills."""
+        """Return Level-1 skill index only (name + description).
+
+        Full docs are intentionally omitted. Claude must call describe_skill(skill_name)
+        before using a skill to load its actions, parameters, and examples.
+        """
         if not self._skills:
             return ""
 
-        lines = ["## Available Skills\n"]
-        lines.append(
-            "You can control devices and perform tasks by calling the `execute_skill` tool. "
-            "The available skills are:\n"
-        )
+        lines = [
+            "## Available Skills\n",
+            "You can control devices and perform tasks by calling the `execute_skill` tool.",
+            "Call `describe_skill(skill_name)` **once per skill per session** to load its full",
+            "documentation. Docs are injected into your active context and persist for the whole",
+            "session — do NOT call `describe_skill` again for the same skill.",
+            "Do not guess parameters — describe first if docs are not yet in your context.\n",
+            "| Skill | Description |",
+            "|-------|-------------|",
+        ]
         for skill in self._skills.values():
-            lines.append(f"### {skill.name}\n{skill.description}\n\n{skill.body.strip()}\n")
+            lines.append(f"| `{skill.name}` | {skill.description} |")
 
         return "\n".join(lines)
+
+    def describe_skill(self, skill_name: str) -> dict:
+        """Return the full SKILL.md body for the named skill (synchronous, no I/O)."""
+        skill = self._skills.get(skill_name)
+        if skill is None:
+            return {
+                "success": False,
+                "message": f"Unknown skill: {skill_name!r}. Available: {list(self._skills)}",
+            }
+        return {"success": True, "skill_name": skill_name, "docs": skill.body.strip()}
 
     def configure_skill(self, skill_name: str, **kwargs: object) -> None:
         """Pass runtime configuration to a skill's module (e.g. mock=True)."""
