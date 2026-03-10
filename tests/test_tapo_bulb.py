@@ -1,7 +1,7 @@
 """Tests for TapoBulb (real device wrapper) with mocked tapo library."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from smarthome.devices import TapoBulb
 
@@ -20,7 +20,7 @@ def mock_device():
 
 @pytest.fixture
 def tapo_bulb(mock_device):
-    return TapoBulb(mock_device)
+    return TapoBulb(mock_device, "user@example.com", "password", "192.168.1.100")
 
 
 @pytest.mark.asyncio
@@ -75,3 +75,35 @@ async def test_set_color_temp_invalid(tapo_bulb, mock_device):
     result = await tapo_bulb.execute("set_color_temp", {"color_temp": 2000})
     assert result["success"] is False
     mock_device.set_color_temperature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reconnects_on_session_timeout(tapo_bulb, mock_device):
+    """On SessionTimeout, execute() reconnects and retries the command."""
+    mock_new_device = AsyncMock()
+    info = MagicMock()
+    info.device_on = True
+    info.brightness = 75
+    info.color_temp = 4000
+    mock_new_device.get_device_info.return_value = info
+
+    mock_device.on.side_effect = Exception("Tapo(SessionTimeout)")
+
+    mock_client = AsyncMock()
+    mock_client.l530.return_value = mock_new_device
+
+    with patch("smarthome.devices.tapo_bulb.ApiClient", return_value=mock_client):
+        result = await tapo_bulb.execute("turn_on", {})
+
+    assert result["success"] is True
+    mock_client.l530.assert_awaited_once_with("192.168.1.100")
+    mock_new_device.on.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_non_session_timeout_error_is_reraised(tapo_bulb, mock_device):
+    """Non-SessionTimeout exceptions are not swallowed."""
+    mock_device.on.side_effect = Exception("Connection refused")
+
+    with pytest.raises(Exception, match="Connection refused"):
+        await tapo_bulb.execute("turn_on", {})

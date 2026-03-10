@@ -206,14 +206,23 @@ class TapoBulb(BaseDevice):
         "get_status": [],
     }
 
-    def __init__(self, device):
+    def __init__(self, device, username: str, password: str, ip_address: str):
         self._device = device
+        self._username = username
+        self._password = password
+        self._ip_address = ip_address
 
     @classmethod
     async def connect(cls, username: str, password: str, ip_address: str) -> "TapoBulb":
         client = ApiClient(username, password)
         device = await client.l530(ip_address)
-        return cls(device)
+        return cls(device, username, password, ip_address)
+
+    async def _reconnect(self) -> None:
+        logger.warning("TapoBulb session expired — reconnecting to %s", self._ip_address)
+        client = ApiClient(self._username, self._password)
+        self._device = await client.l530(self._ip_address)
+        logger.info("TapoBulb reconnected successfully")
 
     async def _get_status(self) -> Dict[str, Any]:
         info = await self._device.get_device_info()
@@ -242,6 +251,15 @@ class TapoBulb(BaseDevice):
         return ["turn_on", "turn_off", "set_brightness", "set_color_temp", "set_color", "get_status"]
 
     async def execute(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return await self._execute_once(action, parameters)
+        except Exception as e:
+            if "SessionTimeout" in str(e):
+                await self._reconnect()
+                return await self._execute_once(action, parameters)
+            raise
+
+    async def _execute_once(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         if action not in self.supported_actions:
             return {
                 "success": False,

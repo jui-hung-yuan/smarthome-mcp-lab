@@ -2501,9 +2501,6 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
-    { name = "awsiotsdk" },
-    { name = "boto3" },
-    { name = "fastmcp" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -2511,6 +2508,13 @@ dependencies = [
     { name = "sqlite-vec" },
     { name = "tapo", version = "0.8.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "tapo", version = "0.8.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.optional-dependencies]
+aws-mcp = [
+    { name = "awsiotsdk" },
+    { name = "boto3" },
+    { name = "fastmcp" },
 ]
 
 [package.dev-dependencies]
@@ -2524,9 +2528,9 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "awsiotsdk", specifier = ">=1.28.0" },
-    { name = "boto3", specifier = ">=1.42.39" },
-    { name = "fastmcp", specifier = ">=2.14.3" },
+    { name = "awsiotsdk", marker = "extra == 'aws-mcp'", specifier = ">=1.28.0" },
+    { name = "boto3", marker = "extra == 'aws-mcp'", specifier = ">=1.42.39" },
+    { name = "fastmcp", marker = "extra == 'aws-mcp'", specifier = ">=2.14.3" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
@@ -2534,6 +2538,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.0" },
     { name = "tapo", specifier = ">=0.8.7" },
 ]
+provides-extras = ["aws-mcp"]
 
 [package.metadata.requires-dev]
 dev = [
